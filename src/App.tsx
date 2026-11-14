@@ -1,31 +1,30 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Clinic, 
-  TherapeuticEvent, 
-  Patient, 
-  Registration, 
-  EvolutionaryAssessment, 
-  MedicalRecord, 
-  Appointment, 
-  FinancialTransaction, 
-  Attendance, 
+import {
+  Clinic,
+  TherapeuticEvent,
+  Patient,
+  Registration,
+  EvolutionaryAssessment,
+  MedicalRecord,
+  Appointment,
+  FinancialTransaction,
+  Attendance,
   UserRole,
-  SystemUser
+  SystemUser,
 } from './types';
-import { db, auth } from './firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { auth } from './firebase';
 import { signOut } from 'firebase/auth';
-import { 
+import {
   COLLECTIONS,
-  seedDatabaseIfNeeded,
   subscribeCollection,
+  subscribeDocument,
   saveDocument,
   removeDocument,
-  getDocument
+  getDocument,
 } from './services/dbService';
 
 // Component imports
-import { Menu, Lock, KeyRound, Eye, EyeOff, CheckCircle2, XCircle, LogOut } from 'lucide-react';
+import { Menu, AlertCircle, X } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import PatientCRM from './components/PatientCRM';
@@ -55,101 +54,19 @@ export default function App() {
   // System User Auth and Session state
   const [currentUser, setCurrentUser] = useState<SystemUser | null>(null);
   const [currentClinic, setCurrentClinic] = useState<Clinic | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [currentRole, setCurrentRole] = useState<UserRole>('Admin');
   const [darkMode, setDarkMode] = useState<boolean>(false);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
 
-  // Connection and first-launch states
+  // Connection and feedback states
   const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState<string>('');
+  const [actionError, setActionError] = useState<string>('');
   const [publicEventId, setPublicEventId] = useState<string | null>(null);
 
-  // Password change states for first access requirement
-  const [currentPasswordInput, setCurrentPasswordInput] = useState('');
-  const [newPasswordInput, setNewPasswordInput] = useState('');
-  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [passwordChangeError, setPasswordChangeError] = useState('');
-  const [passwordChangeSuccess, setPasswordChangeSuccess] = useState('');
-  const [isChangingPassword, setIsChangingPassword] = useState(false);
-
-  const handlePasswordChangeSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordChangeError('');
-    setPasswordChangeSuccess('');
-    setIsChangingPassword(true);
-
-    if (currentPasswordInput !== '1234') {
-      setPasswordChangeError('A senha atual digitada está incorreta.');
-      setIsChangingPassword(false);
-      return;
-    }
-
-    const isMinLength = newPasswordInput.length >= 8;
-    const hasLetterAndNumber = /[a-zA-Z]/.test(newPasswordInput) && /[0-9]/.test(newPasswordInput);
-    const hasUppercase = /[A-Z]/.test(newPasswordInput);
-    const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>_/\-+=~`[\]\\]/.test(newPasswordInput);
-    const passwordsMatch = newPasswordInput === confirmPasswordInput;
-
-    if (!isMinLength) {
-      setPasswordChangeError('A senha deve conter no mínimo 8 caracteres.');
-      setIsChangingPassword(false);
-      return;
-    }
-    if (!hasLetterAndNumber) {
-      setPasswordChangeError('A senha deve conter letras e números.');
-      setIsChangingPassword(false);
-      return;
-    }
-    if (!hasUppercase) {
-      setPasswordChangeError('A senha deve conter no mínimo uma letra maiúscula.');
-      setIsChangingPassword(false);
-      return;
-    }
-    if (!hasSpecialChar) {
-      setPasswordChangeError('A senha deve conter no mínimo um caractere especial (ex: @, #, $, %, etc.).');
-      setIsChangingPassword(false);
-      return;
-    }
-    if (!passwordsMatch) {
-      setPasswordChangeError('A confirmação de senha não confere.');
-      setIsChangingPassword(false);
-      return;
-    }
-    if (newPasswordInput === '1234') {
-      setPasswordChangeError('A nova senha não pode ser a senha padrão 1234.');
-      setIsChangingPassword(false);
-      return;
-    }
-
-    try {
-      if (!currentUser) return;
-      const cleanEmail = currentUser.email.toLowerCase().trim();
-      
-      const updatedUser = {
-        ...currentUser,
-        password: newPasswordInput
-      };
-      
-      await saveDocument(COLLECTIONS.USERS, cleanEmail, updatedUser);
-      
-      setCurrentUser(updatedUser);
-      setPasswordChangeSuccess('Senha alterada com sucesso! Redirecionando...');
-      
-      setCurrentPasswordInput('');
-      setNewPasswordInput('');
-      setConfirmPasswordInput('');
-    } catch (err: any) {
-      console.error(err);
-      setPasswordChangeError(`Erro ao atualizar a senha: ${err.message}`);
-    } finally {
-      setIsChangingPassword(false);
-    }
-  };
-
-  // Coordinate check on page render to see if we clicked "Simulate registration" or accessed public ID
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const eventIdParam = params.get('publicEventId');
@@ -158,113 +75,239 @@ export default function App() {
     }
   }, []);
 
-  // 1. AUTHENTICATION AND DATABASE SEEDING INITIALIZATION
+  // 1. AUTHENTICATION SESSION INITIALIZATION
   useEffect(() => {
-    const initializeAppSession = async () => {
-      // First, seed the cloud database if this is the first deployment run
-      await seedDatabaseIfNeeded();
+    const unsubscribeAuth = auth.onAuthStateChanged(async (firebaseUser) => {
+      setAuthLoading(true);
+      setAuthError('');
 
-      // Set up the listener for Firebase Authentication state changes
-      const unsubscribeAuth = auth.onAuthStateChanged(async (firebaseUser) => {
-        setAuthLoading(true);
-        if (firebaseUser && firebaseUser.email) {
-          try {
-            const cleanEmail = firebaseUser.email.toLowerCase().trim();
-            // Retrieve authorized system user matching the email
-            const systemUser = await getDocument(COLLECTIONS.USERS, cleanEmail) as SystemUser | null;
-            
-            if (systemUser) {
-              if (systemUser.status === 'Ativo') {
-                setCurrentUser(systemUser);
-                setCurrentRole(systemUser.role);
-                
-                // Fetch the default associated clinic for this user
-                const clinicDoc = await getDocument(COLLECTIONS.CLINICS, systemUser.clinicId);
-                if (clinicDoc) {
-                  setCurrentClinic(clinicDoc as Clinic);
-                }
+      if (firebaseUser && firebaseUser.email) {
+        try {
+          const cleanEmail = firebaseUser.email.toLowerCase().trim();
+          const tokenResult = await firebaseUser.getIdTokenResult();
+          const superClaim =
+            tokenResult.claims?.superadmin === true ||
+            (firebaseUser.emailVerified && cleanEmail === 'jossiefreitas.jgf@gmail.com');
+          setIsSuperAdmin(superClaim);
+
+          const systemUser = await getDocument<SystemUser>(COLLECTIONS.USERS, cleanEmail);
+
+          if (systemUser) {
+            if (systemUser.status === 'Ativo' || superClaim) {
+              setCurrentUser(systemUser);
+              setCurrentRole(superClaim ? 'Desenvolvedor' : systemUser.role);
+
+              const clinicDoc = await getDocument<Clinic>(COLLECTIONS.CLINICS, systemUser.clinicId);
+              if (clinicDoc) {
+                setCurrentClinic(clinicDoc);
+              } else if (superClaim) {
+                const defaultClinic: Clinic = {
+                  id: systemUser.clinicId || 'clinic-1',
+                  name: 'CSM Clinical - Matriz',
+                  document: '00.000.000/0001-00',
+                  address: '',
+                  phone: '',
+                  plan: 'Ouro',
+                  status: 'Ativo',
+                };
+                await saveDocument(COLLECTIONS.CLINICS, defaultClinic.id, defaultClinic);
+                setCurrentClinic(defaultClinic);
               } else {
-                console.warn('Access denied: System user status is Inactive.');
-                await signOut(auth);
-                setCurrentUser(null);
+                setAuthError('Clínica vinculada ao usuário não encontrada no Firestore.');
               }
             } else {
-              console.warn('Authorized system user record not found in Firestore.');
               await signOut(auth);
               setCurrentUser(null);
+              setCurrentClinic(null);
+              setAuthError('Acesso indisponível: este usuário está marcado como Inativo.');
             }
-          } catch (err) {
-            console.error('Error during session validation:', err);
+          } else if (superClaim) {
+            const fallbackSuperUser: SystemUser = {
+              id: cleanEmail,
+              clinicId: 'clinic-1',
+              name: firebaseUser.displayName || 'Jossie Freitas',
+              email: cleanEmail,
+              role: 'Desenvolvedor',
+              status: 'Ativo',
+              createdAt: new Date().toISOString().split('T')[0],
+            };
+            setCurrentUser(fallbackSuperUser);
+            setCurrentRole('Desenvolvedor');
+            const clinicDoc = await getDocument<Clinic>(COLLECTIONS.CLINICS, 'clinic-1');
+            if (clinicDoc) {
+              setCurrentClinic(clinicDoc);
+            } else {
+              const defaultClinic: Clinic = {
+                id: 'clinic-1',
+                name: 'CSM Clinical - Matriz',
+                document: '00.000.000/0001-00',
+                address: '',
+                phone: '',
+                plan: 'Ouro',
+                status: 'Ativo',
+              };
+              await saveDocument(COLLECTIONS.CLINICS, 'clinic-1', defaultClinic);
+              setCurrentClinic(defaultClinic);
+            }
+          } else {
+            await signOut(auth);
             setCurrentUser(null);
+            setCurrentClinic(null);
+            setAuthError(
+              'Perfil de usuário não provisionado no Firestore. Solicite ao administrador o cadastro via Admin CLI.'
+            );
           }
-        } else {
+        } catch (err) {
+          console.error('Error during session validation:', err);
           setCurrentUser(null);
           setCurrentClinic(null);
+          setAuthError('Não foi possível validar o perfil no Firestore. Verifique suas permissões.');
         }
-        setAuthLoading(false);
-      });
+      } else {
+        setIsSuperAdmin(false);
+        setCurrentUser(null);
+        setCurrentClinic(null);
+      }
+      setAuthLoading(false);
+    });
 
-      return unsubscribeAuth;
+    return () => {
+      unsubscribeAuth();
+    };
+  }, []);
+
+  // 2. REAL-TIME MULTI-TENANT DATABASE SYNCHRONIZATION (MATCHING FIRESTORE RULES)
+  useEffect(() => {
+    if (!currentUser || !currentClinic) return;
+
+    const clinicId = currentClinic.id;
+    const realRole = currentUser.role;
+    const unsubscribers: Array<() => void> = [];
+
+    const handleSubError = (err: Error) => {
+      console.error('Subscription error:', err);
     };
 
-      let unsubAuthPromise = initializeAppSession();
- 
-       return () => {
-         unsubAuthPromise.then(unsub => unsub && unsub());
-       };
-     }, []);
- 
-     // 1.5. GLOBAL CLINICS LIST SYNCHRONIZATION FOR REGISTRATION/LOGIN
-     useEffect(() => {
-       const unsubClinicsGlobal = subscribeCollection<Clinic>(COLLECTIONS.CLINICS, null, setClinics);
-       return () => {
-         unsubClinicsGlobal();
-       };
-     }, []);
- 
-     // 2. REAL-TIME MULTI-TENANT DATABASE SYNCHRONIZATION (TENANT ISOLATION)
-     useEffect(() => {
-       if (!currentUser || !currentClinic) return;
- 
-       const clinicId = currentClinic.id;
-       const role = currentUser.role;
- 
-       // Subscriptions separated logically by subscriber/tenant (clinicId)
-       // Developers have universal reading capabilities to audit the SaaS
-       const unsubUsers = subscribeCollection<SystemUser>(COLLECTIONS.USERS, clinicId, setSystemUsers, role);
-       const unsubEvents = subscribeCollection<TherapeuticEvent>(COLLECTIONS.EVENTS, clinicId, setEvents, role);
-       const unsubPatients = subscribeCollection<Patient>(COLLECTIONS.PATIENTS, clinicId, setPatients, role);
-       const unsubRegistrations = subscribeCollection<Registration>(COLLECTIONS.REGISTRATIONS, clinicId, setRegistrations, role);
-       const unsubAssessments = subscribeCollection<EvolutionaryAssessment>(COLLECTIONS.ASSESSMENTS, clinicId, setAssessments, role);
-       const unsubMedicalRecords = subscribeCollection<MedicalRecord>(COLLECTIONS.MEDICAL_RECORDS, clinicId, setMedicalRecords, role);
-       const unsubAppointments = subscribeCollection<Appointment>(COLLECTIONS.APPOINTMENTS, clinicId, setAppointments, role);
-       const unsubTransactions = subscribeCollection<FinancialTransaction>(COLLECTIONS.TRANSACTIONS, clinicId, setTransactions, role);
-       const unsubAttendances = subscribeCollection<Attendance>(COLLECTIONS.ATTENDANCES, clinicId, setAttendances, role);
- 
-       return () => {
-         unsubUsers();
-         unsubEvents();
-         unsubPatients();
-         unsubRegistrations();
-         unsubAssessments();
-         unsubMedicalRecords();
-         unsubAppointments();
-         unsubTransactions();
-         unsubAttendances();
-       };
-     }, [currentUser, currentClinic?.id]);
-
-  // Sync role to currentUser role changes
-  useEffect(() => {
-    if (currentUser) {
-      setCurrentRole(currentUser.role);
+    // Clinics: superadmin can list all; staff can get their own clinic document
+    if (isSuperAdmin) {
+      unsubscribers.push(
+        subscribeCollection<Clinic>(COLLECTIONS.CLINICS, null, setClinics, true, handleSubError)
+      );
+    } else {
+      unsubscribers.push(
+        subscribeDocument<Clinic>(
+          COLLECTIONS.CLINICS,
+          clinicId,
+          (c) => setClinics(c ? [c] : []),
+          handleSubError
+        )
+      );
     }
-  }, [currentUser]);
+
+    // Users: superadmin sees all, Admin sees clinic users, others see only themselves
+    if (isSuperAdmin || realRole === 'Admin') {
+      unsubscribers.push(
+        subscribeCollection<SystemUser>(
+          COLLECTIONS.USERS,
+          clinicId,
+          setSystemUsers,
+          isSuperAdmin,
+          handleSubError
+        )
+      );
+    } else {
+      setSystemUsers([currentUser]);
+    }
+
+    const isStaff = isSuperAdmin || ['Admin', 'Fisio', 'Recepcao'].includes(realRole);
+    const isClinical = isSuperAdmin || ['Admin', 'Fisio'].includes(realRole);
+    const isAdmin = isSuperAdmin || realRole === 'Admin';
+
+    if (isStaff) {
+      unsubscribers.push(
+        subscribeCollection<TherapeuticEvent>(
+          COLLECTIONS.EVENTS,
+          clinicId,
+          setEvents,
+          isSuperAdmin,
+          handleSubError
+        ),
+        subscribeCollection<Patient>(
+          COLLECTIONS.PATIENTS,
+          clinicId,
+          setPatients,
+          isSuperAdmin,
+          handleSubError
+        ),
+        subscribeCollection<Registration>(
+          COLLECTIONS.REGISTRATIONS,
+          clinicId,
+          setRegistrations,
+          isSuperAdmin,
+          handleSubError
+        ),
+        subscribeCollection<Appointment>(
+          COLLECTIONS.APPOINTMENTS,
+          clinicId,
+          setAppointments,
+          isSuperAdmin,
+          handleSubError
+        ),
+        subscribeCollection<Attendance>(
+          COLLECTIONS.ATTENDANCES,
+          clinicId,
+          setAttendances,
+          isSuperAdmin,
+          handleSubError
+        )
+      );
+    }
+
+    if (isClinical) {
+      unsubscribers.push(
+        subscribeCollection<EvolutionaryAssessment>(
+          COLLECTIONS.ASSESSMENTS,
+          clinicId,
+          setAssessments,
+          isSuperAdmin,
+          handleSubError
+        ),
+        subscribeCollection<MedicalRecord>(
+          COLLECTIONS.MEDICAL_RECORDS,
+          clinicId,
+          setMedicalRecords,
+          isSuperAdmin,
+          handleSubError
+        )
+      );
+    } else {
+      setAssessments([]);
+      setMedicalRecords([]);
+    }
+
+    if (isAdmin) {
+      unsubscribers.push(
+        subscribeCollection<FinancialTransaction>(
+          COLLECTIONS.TRANSACTIONS,
+          clinicId,
+          setTransactions,
+          isSuperAdmin,
+          handleSubError
+        )
+      );
+    } else {
+      setTransactions([]);
+    }
+
+    return () => {
+      unsubscribers.forEach((unsub) => unsub());
+    };
+  }, [currentUser, currentClinic?.id, isSuperAdmin]);
 
   // Sync currentClinic state to its updated values from Firestore
   useEffect(() => {
     if (currentClinic && clinics.length > 0) {
-      const updated = clinics.find(c => c.id === currentClinic.id);
+      const updated = clinics.find((c) => c.id === currentClinic.id);
       if (updated) {
         setCurrentClinic(updated);
       }
@@ -275,6 +318,7 @@ export default function App() {
     await signOut(auth);
     setCurrentUser(null);
     setCurrentClinic(null);
+    setIsSuperAdmin(false);
     setActiveTab('dashboard');
   };
 
@@ -282,324 +326,389 @@ export default function App() {
     setPublicEventId(eventId);
   };
 
-  // 1. EVENT MANAGEMENT CALLBACKS
-  const handleAddEvent = async (eventData: Omit<TherapeuticEvent, 'id' | 'clinicId'>) => {
-    if (!currentClinic) return;
-    const id = `event-${Date.now()}`;
-    const newEvent: TherapeuticEvent = {
-      ...eventData,
-      id,
-      clinicId: currentClinic.id
-    };
-    await saveDocument(COLLECTIONS.EVENTS, id, newEvent);
-  };
-
-  const handleUpdateEventStatus = async (id: string, status: TherapeuticEvent['status']) => {
-    await saveDocument(COLLECTIONS.EVENTS, id, { status });
-    if (status === 'Cancelado') {
-      const eventRegs = registrations.filter(r => r.eventId === id);
-      for (const reg of eventRegs) {
-        await saveDocument(COLLECTIONS.REGISTRATIONS, reg.id, { status: 'Cancelado' });
-      }
+  const runMutation = async (fn: () => Promise<void>, fallbackMessage: string) => {
+    setActionError('');
+    try {
+      await fn();
+    } catch (err) {
+      console.error(fallbackMessage, err);
+      setActionError(fallbackMessage);
     }
   };
 
+  // 1. EVENT MANAGEMENT CALLBACKS
+  const handleAddEvent = async (eventData: Omit<TherapeuticEvent, 'id' | 'clinicId'>) => {
+    if (!currentClinic) return;
+    await runMutation(async () => {
+      const id = `event-${Date.now()}`;
+      const newEvent: TherapeuticEvent = {
+        ...eventData,
+        id,
+        clinicId: currentClinic.id,
+      };
+      await saveDocument(COLLECTIONS.EVENTS, id, newEvent);
+    }, 'Sem permissão ou erro ao criar evento.');
+  };
+
+  const handleUpdateEventStatus = async (id: string, status: TherapeuticEvent['status']) => {
+    await runMutation(async () => {
+      await saveDocument(COLLECTIONS.EVENTS, id, { status });
+      if (status === 'Cancelado') {
+        const eventRegs = registrations.filter((r) => r.eventId === id);
+        for (const reg of eventRegs) {
+          await saveDocument(COLLECTIONS.REGISTRATIONS, reg.id, {
+            status: 'Cancelado',
+            patientId: reg.patientId || reg.childId,
+          });
+        }
+      }
+    }, 'Sem permissão ou erro ao atualizar status do evento.');
+  };
+
   const handleDeleteEvent = async (id: string) => {
-    await removeDocument(COLLECTIONS.EVENTS, id);
+    await runMutation(async () => {
+      await removeDocument(COLLECTIONS.EVENTS, id);
+    }, 'Sem permissão ou erro ao excluir evento.');
   };
 
   const handleToggleAttendance = async (eventId: string, patientId: string, present: boolean) => {
-    const existing = attendances.find(a => a.eventId === eventId && a.patientId === patientId);
-    const id = existing ? existing.id : `att-${Date.now()}`;
-    await saveDocument(COLLECTIONS.ATTENDANCES, id, {
-      id,
-      eventId,
-      patientId,
-      present,
-      notes: existing ? existing.notes : ''
-    });
+    if (!currentClinic) return;
+    await runMutation(async () => {
+      const existing = attendances.find((a) => a.eventId === eventId && a.patientId === patientId);
+      const event = events.find((e) => e.id === eventId);
+      const id = existing ? existing.id : `att-${Date.now()}`;
+      await saveDocument(COLLECTIONS.ATTENDANCES, id, {
+        id,
+        clinicId: existing?.clinicId || event?.clinicId || currentClinic.id,
+        eventId,
+        patientId,
+        present,
+        notes: existing ? existing.notes : '',
+      });
+    }, 'Sem permissão ou erro ao registrar presença.');
   };
 
   const handleUpdateAttendanceNotes = async (eventId: string, patientId: string, notes: string) => {
-    const existing = attendances.find(a => a.eventId === eventId && a.patientId === patientId);
-    const id = existing ? existing.id : `att-${Date.now()}`;
-    await saveDocument(COLLECTIONS.ATTENDANCES, id, {
-      id,
-      eventId,
-      patientId,
-      present: existing ? existing.present : true,
-      notes
-    });
+    if (!currentClinic) return;
+    await runMutation(async () => {
+      const existing = attendances.find((a) => a.eventId === eventId && a.patientId === patientId);
+      const event = events.find((e) => e.id === eventId);
+      const id = existing ? existing.id : `att-${Date.now()}`;
+      await saveDocument(COLLECTIONS.ATTENDANCES, id, {
+        id,
+        clinicId: existing?.clinicId || event?.clinicId || currentClinic.id,
+        eventId,
+        patientId,
+        present: existing ? existing.present : true,
+        notes,
+      });
+    }, 'Sem permissão ou erro ao salvar observações de presença.');
   };
 
   // 2. PATIENT CRM CALLBACKS
   const handleAddPatient = async (patientData: Omit<Patient, 'id' | 'clinicId' | 'photo' | 'createdAt'>) => {
     if (!currentClinic) return;
-    const id = `patient-${Date.now()}`;
-    const newPatient: Patient = {
-      ...patientData,
-      id,
-      clinicId: currentClinic.id,
-      photo: 'https://images.unsplash.com/photo-1502086223501-7ea6ecd79368?auto=format&fit=crop&q=80&w=200',
-      createdAt: new Date().toISOString()
-    };
-    await saveDocument(COLLECTIONS.PATIENTS, id, newPatient);
-    setSelectedPatientId(id);
+    await runMutation(async () => {
+      const id = `patient-${Date.now()}`;
+      const newPatient: Patient = {
+        ...patientData,
+        id,
+        clinicId: currentClinic.id,
+        photo: 'https://images.unsplash.com/photo-1502086223501-7ea6ecd79368?auto=format&fit=crop&q=80&w=200',
+        createdAt: new Date().toISOString(),
+      };
+      await saveDocument(COLLECTIONS.PATIENTS, id, newPatient);
+      setSelectedPatientId(id);
+    }, 'Sem permissão ou erro ao cadastrar paciente.');
   };
 
   const handleUpdatePatient = async (id: string, patch: Partial<Patient>) => {
-    await saveDocument(COLLECTIONS.PATIENTS, id, patch);
+    await runMutation(async () => {
+      await saveDocument(COLLECTIONS.PATIENTS, id, patch);
+    }, 'Sem permissão ou erro ao atualizar paciente.');
   };
 
-  const handleAddAssessment = async (patientId: string, assData: Omit<EvolutionaryAssessment, 'id' | 'patientId' | 'date' | 'author'>) => {
-    const id = `eval-${Date.now()}`;
-    const newAss: EvolutionaryAssessment = {
-      ...assData,
-      id,
-      patientId,
-      date: new Date().toISOString().split('T')[0],
-      author: currentUser?.name || 'Profissional'
-    };
-    await saveDocument(COLLECTIONS.ASSESSMENTS, id, newAss);
+  const handleAddAssessment = async (
+    patientId: string,
+    assData: Omit<EvolutionaryAssessment, 'id' | 'patientId' | 'date' | 'author'>
+  ) => {
+    if (!currentClinic) return;
+    await runMutation(async () => {
+      const patient = patients.find((p) => p.id === patientId);
+      const id = `eval-${Date.now()}`;
+      const newAss: EvolutionaryAssessment = {
+        ...assData,
+        id,
+        clinicId: patient?.clinicId || currentClinic.id,
+        patientId,
+        date: new Date().toISOString().split('T')[0],
+        author: currentUser?.name || 'Profissional',
+      };
+      await saveDocument(COLLECTIONS.ASSESSMENTS, id, newAss);
+    }, 'Sem permissão ou erro ao salvar avaliação evolutiva.');
   };
 
-  const handleAddMedicalRecord = async (patientId: string, recData: Omit<MedicalRecord, 'id' | 'patientId' | 'date' | 'author'>) => {
-    const id = `rec-${Date.now()}`;
-    const newRecord: MedicalRecord = {
-      ...recData,
-      id,
-      patientId,
-      date: new Date().toISOString().split('T')[0],
-      author: currentUser?.name || 'Profissional'
-    };
-    await saveDocument(COLLECTIONS.MEDICAL_RECORDS, id, newRecord);
+  const handleAddMedicalRecord = async (
+    patientId: string,
+    recData: Omit<MedicalRecord, 'id' | 'patientId' | 'date' | 'author'>
+  ) => {
+    if (!currentClinic) return;
+    await runMutation(async () => {
+      const patient = patients.find((p) => p.id === patientId);
+      const id = `rec-${Date.now()}`;
+      const newRecord: MedicalRecord = {
+        ...recData,
+        id,
+        clinicId: patient?.clinicId || currentClinic.id,
+        patientId,
+        date: new Date().toISOString().split('T')[0],
+        author: currentUser?.name || 'Profissional',
+      };
+      await saveDocument(COLLECTIONS.MEDICAL_RECORDS, id, newRecord);
+    }, 'Sem permissão ou erro ao salvar prontuário.');
   };
 
   // 3. APPOINTMENT SCHEDULING CALLBACKS
   const handleAddAppointment = async (appData: Omit<Appointment, 'id' | 'clinicId' | 'patientName'>) => {
     if (!currentClinic) return;
-    const child = patients.find(p => p.id === appData.patientId);
-    const id = `app-${Date.now()}`;
-    const newApp: Appointment = {
-      ...appData,
-      id,
-      clinicId: currentClinic.id,
-      patientName: child ? child.name : 'Paciente Desconhecido'
-    };
-    await saveDocument(COLLECTIONS.APPOINTMENTS, id, newApp);
-
-    if (newApp.status === 'Realizado') {
-      const txId = `tx-${Date.now()}`;
-      const newTx: FinancialTransaction = {
-        id: txId,
-        clinicId: currentClinic.id,
-        type: 'Receita',
-        category: 'Atendimento Particular',
-        value: newApp.price,
-        date: newApp.date,
-        description: `Sessão ${newApp.type} - ${newApp.patientName}`,
-        referenceId: id
+    await runMutation(async () => {
+      const child = patients.find((p) => p.id === appData.patientId);
+      const id = `app-${Date.now()}`;
+      const newApp: Appointment = {
+        ...appData,
+        id,
+        clinicId: child?.clinicId || currentClinic.id,
+        patientName: child ? child.name : 'Paciente Desconhecido',
       };
-      await saveDocument(COLLECTIONS.TRANSACTIONS, txId, newTx);
-    }
-  };
+      await saveDocument(COLLECTIONS.APPOINTMENTS, id, newApp);
 
-  const handleUpdateAppointmentStatus = async (id: string, status: Appointment['status']) => {
-    const a = appointments.find(app => app.id === id);
-    if (!a) return;
-    const oldStatus = a.status;
-
-    await saveDocument(COLLECTIONS.APPOINTMENTS, id, { status });
-
-    if (status === 'Realizado' && oldStatus !== 'Realizado') {
-      const txExists = transactions.some(t => t.referenceId === id);
-      if (!txExists) {
+      if (newApp.status === 'Realizado' && (isSuperAdmin || currentUser?.role === 'Admin')) {
         const txId = `tx-${Date.now()}`;
         const newTx: FinancialTransaction = {
           id: txId,
-          clinicId: a.clinicId,
+          clinicId: newApp.clinicId,
           type: 'Receita',
           category: 'Atendimento Particular',
-          value: a.price,
-          date: a.date,
-          description: `Sessão ${a.type} - ${a.patientName}`,
-          referenceId: id
+          value: newApp.price,
+          date: newApp.date,
+          description: `Sessão ${newApp.type} - ${newApp.patientName}`,
+          referenceId: id,
         };
         await saveDocument(COLLECTIONS.TRANSACTIONS, txId, newTx);
       }
-    }
+    }, 'Sem permissão ou erro ao criar agendamento.');
+  };
+
+  const handleUpdateAppointmentStatus = async (id: string, status: Appointment['status']) => {
+    const a = appointments.find((app) => app.id === id);
+    if (!a) return;
+    const oldStatus = a.status;
+
+    await runMutation(async () => {
+      await saveDocument(COLLECTIONS.APPOINTMENTS, id, { status });
+
+      if (
+        status === 'Realizado' &&
+        oldStatus !== 'Realizado' &&
+        (isSuperAdmin || currentUser?.role === 'Admin')
+      ) {
+        const txExists = transactions.some((t) => t.referenceId === id);
+        if (!txExists) {
+          const txId = `tx-${Date.now()}`;
+          const newTx: FinancialTransaction = {
+            id: txId,
+            clinicId: a.clinicId,
+            type: 'Receita',
+            category: 'Atendimento Particular',
+            value: a.price,
+            date: a.date,
+            description: `Sessão ${a.type} - ${a.patientName}`,
+            referenceId: id,
+          };
+          await saveDocument(COLLECTIONS.TRANSACTIONS, txId, newTx);
+        }
+      }
+    }, 'Sem permissão ou erro ao atualizar agendamento.');
   };
 
   const handleDeleteAppointment = async (id: string) => {
-    await removeDocument(COLLECTIONS.APPOINTMENTS, id);
+    await runMutation(async () => {
+      await removeDocument(COLLECTIONS.APPOINTMENTS, id);
+    }, 'Sem permissão ou erro ao excluir agendamento.');
   };
 
   // 4. FINANCIAL LEDGER CALLBACKS
   const handleAddTransaction = async (txData: Omit<FinancialTransaction, 'id' | 'clinicId'>) => {
     if (!currentClinic) return;
-    const id = `tx-${Date.now()}`;
-    const newTx: FinancialTransaction = {
-      ...txData,
-      id,
-      clinicId: currentClinic.id
-    };
-    await saveDocument(COLLECTIONS.TRANSACTIONS, id, newTx);
+    await runMutation(async () => {
+      const id = `tx-${Date.now()}`;
+      const newTx: FinancialTransaction = {
+        ...txData,
+        id,
+        clinicId: currentClinic.id,
+      };
+      await saveDocument(COLLECTIONS.TRANSACTIONS, id, newTx);
+    }, 'Sem permissão ou erro ao registrar transação financeira.');
   };
 
   const handleDeleteTransaction = async (id: string) => {
-    await removeDocument(COLLECTIONS.TRANSACTIONS, id);
+    await runMutation(async () => {
+      await removeDocument(COLLECTIONS.TRANSACTIONS, id);
+    }, 'Sem permissão ou erro ao excluir transação.');
   };
 
-  // 5. REGISTRATION AND BILLING CENTER - APROVAÇÃO FINANCEIRA
+  // 5. REGISTRATION AND BILLING CENTER
   const handleApproveRegistration = async (id: string) => {
-    const reg = registrations.find(r => r.id === id);
+    const reg = registrations.find((r) => r.id === id);
     if (!reg) return;
 
-    await saveDocument(COLLECTIONS.REGISTRATIONS, id, { status: 'Aprovado' });
+    await runMutation(async () => {
+      await saveDocument(COLLECTIONS.REGISTRATIONS, id, {
+        status: 'Aprovado',
+        patientId: reg.patientId || reg.childId,
+      });
 
-    const matchedEvent = events.find(e => e.id === reg.eventId);
-    if (matchedEvent) {
-      const txId = `tx-${Date.now()}`;
-      const newTx: FinancialTransaction = {
-        id: txId,
-        clinicId: reg.clinicId,
-        type: 'Receita',
-        category: 'Inscrição de Evento',
-        value: matchedEvent.price,
-        date: new Date().toISOString().split('T')[0],
-        description: `Inscrição ${matchedEvent.name} - ${reg.childName} (${reg.registrationNumber})`,
-        referenceId: reg.id
-      };
-      await saveDocument(COLLECTIONS.TRANSACTIONS, txId, newTx);
-    }
+      const matchedEvent = events.find((e) => e.id === reg.eventId);
+      if (matchedEvent && (isSuperAdmin || currentUser?.role === 'Admin')) {
+        const txId = `tx-${Date.now()}`;
+        const newTx: FinancialTransaction = {
+          id: txId,
+          clinicId: reg.clinicId,
+          type: 'Receita',
+          category: 'Inscrição de Evento',
+          value: matchedEvent.price,
+          date: new Date().toISOString().split('T')[0],
+          description: `Inscrição ${matchedEvent.name} - ${reg.childName} (${reg.registrationNumber})`,
+          referenceId: reg.id,
+        };
+        await saveDocument(COLLECTIONS.TRANSACTIONS, txId, newTx);
+      }
+    }, 'Sem permissão ou erro ao aprovar inscrição.');
   };
 
-  // 6. PUBLIC REGISTRATION HANDLER
+  // 6. REGISTRATION FORM HANDLER (authenticated staff simulation / intake)
   const handleAddRegistrationFromPublicForm = async (
     patientInput: Omit<Patient, 'id' | 'clinicId' | 'photo' | 'createdAt'>,
     registrationInput: Omit<Registration, 'id' | 'clinicId' | 'registrationNumber' | 'date'>
   ) => {
-    const matchedEvent = events.find(e => e.id === registrationInput.eventId);
-    const targetClinicId = matchedEvent ? matchedEvent.clinicId : (currentClinic?.id || 'clinic-1');
+    await runMutation(async () => {
+      const matchedEvent = events.find((e) => e.id === registrationInput.eventId);
+      const targetClinicId = matchedEvent ? matchedEvent.clinicId : currentClinic?.id || 'clinic-1';
 
-    let foundPatient = patients.find(p => 
-      p.clinicId === targetClinicId && 
-      p.name.trim().toLowerCase() === patientInput.name.trim().toLowerCase()
-    );
+      const foundPatient = patients.find(
+        (p) =>
+          p.clinicId === targetClinicId &&
+          p.name.trim().toLowerCase() === patientInput.name.trim().toLowerCase()
+      );
 
-    let childId = '';
-    if (foundPatient) {
-      childId = foundPatient.id;
-    } else {
-      childId = `patient-${Date.now()}`;
-      const newPatient: Patient = {
-        ...patientInput,
-        id: childId,
+      let childId = '';
+      if (foundPatient) {
+        childId = foundPatient.id;
+      } else {
+        childId = `patient-${Date.now()}`;
+        const newPatient: Patient = {
+          ...patientInput,
+          id: childId,
+          clinicId: targetClinicId,
+          photo: 'https://images.unsplash.com/photo-1502086223501-7ea6ecd79368?auto=format&fit=crop&q=80&w=200',
+          createdAt: new Date().toISOString(),
+        };
+        await saveDocument(COLLECTIONS.PATIENTS, childId, newPatient);
+      }
+
+      const regId = `reg-${Date.now() + 1}`;
+      const newReg: Registration = {
+        ...registrationInput,
+        id: regId,
         clinicId: targetClinicId,
-        photo: 'https://images.unsplash.com/photo-1502086223501-7ea6ecd79368?auto=format&fit=crop&q=80&w=200',
-        createdAt: new Date().toISOString()
-      };
-      await saveDocument(COLLECTIONS.PATIENTS, childId, newPatient);
-    }
-
-    const regId = `reg-${Date.now() + 1}`;
-    const newReg: Registration = {
-      ...registrationInput,
-      id: regId,
-      clinicId: targetClinicId,
-      childId,
-      registrationNumber: `INS-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-      date: new Date().toISOString().split('T')[0]
-    };
-    await saveDocument(COLLECTIONS.REGISTRATIONS, regId, newReg);
-
-    if (newReg.status === 'Aprovado' && matchedEvent) {
-      const txId = `tx-${Date.now() + 3}`;
-      const newTx: FinancialTransaction = {
-        id: txId,
-        clinicId: targetClinicId,
-        type: 'Receita',
-        category: 'Inscrição de Evento',
-        value: matchedEvent.price,
+        childId,
+        patientId: childId,
+        registrationNumber: `INS-2026-${Math.floor(1000 + Math.random() * 9000)}`,
         date: new Date().toISOString().split('T')[0],
-        description: `Inscrição ${matchedEvent.name} - ${newReg.childName} (${newReg.registrationNumber})`,
-        referenceId: regId
       };
-      await saveDocument(COLLECTIONS.TRANSACTIONS, txId, newTx);
-    }
+      await saveDocument(COLLECTIONS.REGISTRATIONS, regId, newReg);
 
-    const appId = `app-${Date.now() + 2}`;
-    const newAppointment: Appointment = {
-      id: appId,
-      clinicId: targetClinicId,
-      patientId: childId,
-      patientName: patientInput.name,
-      date: matchedEvent ? matchedEvent.date : new Date().toISOString().split('T')[0],
-      time: matchedEvent ? matchedEvent.time : '14:00',
-      type: 'Integração Sensorial',
-      price: matchedEvent ? matchedEvent.price : 150.0,
-      status: 'Agendado'
-    };
-    await saveDocument(COLLECTIONS.APPOINTMENTS, appId, newAppointment);
+      if (
+        newReg.status === 'Aprovado' &&
+        matchedEvent &&
+        (isSuperAdmin || currentUser?.role === 'Admin')
+      ) {
+        const txId = `tx-${Date.now() + 3}`;
+        const newTx: FinancialTransaction = {
+          id: txId,
+          clinicId: targetClinicId,
+          type: 'Receita',
+          category: 'Inscrição de Evento',
+          value: matchedEvent.price,
+          date: new Date().toISOString().split('T')[0],
+          description: `Inscrição ${matchedEvent.name} - ${newReg.childName} (${newReg.registrationNumber})`,
+          referenceId: regId,
+        };
+        await saveDocument(COLLECTIONS.TRANSACTIONS, txId, newTx);
+      }
+
+      const appId = `app-${Date.now() + 2}`;
+      const newAppointment: Appointment = {
+        id: appId,
+        clinicId: targetClinicId,
+        patientId: childId,
+        patientName: patientInput.name,
+        date: matchedEvent ? matchedEvent.date : new Date().toISOString().split('T')[0],
+        time: matchedEvent ? matchedEvent.time : '14:00',
+        type: 'Integração Sensorial',
+        price: matchedEvent ? matchedEvent.price : 150.0,
+        status: 'Agendado',
+      };
+      await saveDocument(COLLECTIONS.APPOINTMENTS, appId, newAppointment);
+    }, 'Sem permissão ou erro ao registrar inscrição.');
   };
 
-  // 7. MULTI-CLINIC MANAGEMENT (SaaS Operator Panel)
+  // 7. MULTI-CLINIC MANAGEMENT (Superadmin only per firestore.rules)
   const handleAddClinic = async (clinicData: Omit<Clinic, 'id'>) => {
-    const id = `clinic-${Date.now()}`;
-    const newClinic: Clinic = {
-      ...clinicData,
-      id,
-      status: 'Ativo'
-    };
-    await saveDocument(COLLECTIONS.CLINICS, id, newClinic);
-    setCurrentClinic(newClinic);
+    await runMutation(async () => {
+      const id = `clinic-${Date.now()}`;
+      const newClinic: Clinic = {
+        ...clinicData,
+        id,
+        status: 'Ativo',
+      };
+      await saveDocument(COLLECTIONS.CLINICS, id, newClinic);
+      setCurrentClinic(newClinic);
+    }, 'Apenas Superadministradores podem criar novas clínicas.');
   };
 
   const handleUpdateClinicPlan = async (id: string, plan: Clinic['plan']) => {
-    await saveDocument(COLLECTIONS.CLINICS, id, { plan });
+    await runMutation(async () => {
+      await saveDocument(COLLECTIONS.CLINICS, id, { plan });
+    }, 'Apenas Superadministradores podem alterar planos da clínica.');
   };
 
   const handleUpdateClinicDetails = async (id: string, patch: Partial<Clinic>) => {
-    await saveDocument(COLLECTIONS.CLINICS, id, patch);
+    await runMutation(async () => {
+      await saveDocument(COLLECTIONS.CLINICS, id, patch);
+    }, 'Sem permissão para alterar dados da clínica (requer Superadmin).');
   };
 
-  const handleAddSystemUser = async (userData: Omit<SystemUser, 'id' | 'createdAt'>) => {
-    const emailId = userData.email.toLowerCase().trim();
-    const newUser: SystemUser = {
-      ...userData,
-      id: emailId,
-      createdAt: new Date().toISOString().split('T')[0]
-    };
-    await saveDocument(COLLECTIONS.USERS, emailId, newUser);
-
-    // Multi-tenant email registration confirmation trick:
-    // Create their auth record in background using a separate Firebase app instance,
-    // so it doesn't log out the currently active Administrator session.
-    // This allows immediately shooting password recovery and registration emails!
-    try {
-      const { initializeApp } = await import('firebase/app');
-      const { getAuth, createUserWithEmailAndPassword, sendPasswordResetEmail, sendEmailVerification } = await import('firebase/auth');
-      const firebaseConfig = await import('../firebase-applet-config.json');
-
-      const tempApp = initializeApp(firebaseConfig.default, `temp-${Date.now()}`);
-      const tempAuth = getAuth(tempApp);
-
-      const userCred = await createUserWithEmailAndPassword(tempAuth, userData.email, userData.password || '1234');
-      await sendEmailVerification(userCred.user);
-      await sendPasswordResetEmail(tempAuth, userData.email);
-      await tempAuth.signOut();
-      console.log(`Successfully dispatched confirmation/recovery email to ${userData.email}`);
-    } catch (e) {
-      console.warn("Auth user pre-registration skipped (might already exist or network offline):", e);
-    }
+  const handleAddSystemUser = async (_userData: Omit<SystemUser, 'id' | 'createdAt'>) => {
+    setActionError(
+      'Criação de novos usuários deve ser executada via Firebase Admin CLI (npm run admin -- create-user) por segurança.'
+    );
   };
 
   const handleUpdateSystemUser = async (id: string, patch: Partial<SystemUser>) => {
-    await saveDocument(COLLECTIONS.USERS, id, patch);
+    await runMutation(async () => {
+      const safePatch: Partial<SystemUser> = {};
+      if (patch.name !== undefined) safePatch.name = patch.name;
+      if (patch.status !== undefined) safePatch.status = patch.status;
+      if (patch.role !== undefined) safePatch.role = patch.role;
+      await saveDocument(COLLECTIONS.USERS, id, safePatch);
+    }, 'Sem permissão para atualizar este usuário.');
   };
 
-  const handleDeleteSystemUser = async (id: string) => {
-    await removeDocument(COLLECTIONS.USERS, id);
+  const handleDeleteSystemUser = async (_id: string) => {
+    setActionError(
+      'Exclusão de usuários é bloqueada no navegador pelas regras de segurança. Altere o status para Inativo ou use o Firebase Admin CLI.'
+    );
   };
 
   // Render loading spinner when resolving Firebase session
@@ -613,10 +722,24 @@ export default function App() {
     );
   }
 
-  // Routing render
+  if (!currentUser || !currentClinic) {
+    return (
+      <Login
+        systemUsers={systemUsers}
+        onLoginSuccess={() => {}}
+        onRegisterUser={() => {}}
+        darkMode={darkMode}
+        setDarkMode={setDarkMode}
+        clinics={clinics}
+        externalError={authError}
+      />
+    );
+  }
+
+  // Authenticated intake / public form preview
   if (publicEventId) {
     return (
-      <PublicRegistration 
+      <PublicRegistration
         events={events}
         selectedEventId={publicEventId}
         onBackToCRM={() => {
@@ -629,191 +752,14 @@ export default function App() {
     );
   }
 
-  if (!currentUser || !currentClinic) {
-    return (
-      <Login 
-        systemUsers={systemUsers}
-        onLoginSuccess={() => {}} // Driven by auth state listener
-        onRegisterUser={() => {}} // Driven by auth state listener
-        darkMode={darkMode}
-        setDarkMode={setDarkMode}
-        clinics={clinics}
-      />
-    );
-  }
-
-  if (currentUser && currentUser.password === '1234') {
-    const isMinLength = newPasswordInput.length >= 8;
-    const hasLetterAndNumber = /[a-zA-Z]/.test(newPasswordInput) && /[0-9]/.test(newPasswordInput);
-    const hasUppercase = /[A-Z]/.test(newPasswordInput);
-    const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>_/\-+=~`[\]\\]/.test(newPasswordInput);
-    const passwordsMatch = confirmPasswordInput !== '' && newPasswordInput === confirmPasswordInput;
-
-    const reqs = [
-      { label: 'No mínimo 8 caracteres', met: isMinLength },
-      { label: 'Conter letras e números', met: hasLetterAndNumber },
-      { label: 'No mínimo uma letra maiúscula', met: hasUppercase },
-      { label: 'No mínimo um caractere especial (ex: @, #, $, %)', met: hasSpecialChar },
-      { label: 'Confirmação de senha idêntica', met: passwordsMatch },
-    ];
-
-    return (
-      <div className={`min-h-screen flex items-center justify-center p-4 transition-colors duration-300 ${darkMode ? 'dark bg-[#1B221E] text-[#ECEBE5]' : 'bg-[#F9F8F3] text-[#2D312E]'}`}>
-        <div className={`w-full max-w-md p-8 rounded-3xl shadow-2xl border transition-all duration-300 ${darkMode ? 'bg-[#232B26] border-[#303B34]' : 'bg-white border-slate-200'}`}>
-          <div className="flex flex-col items-center mb-6 text-center">
-            <div className={`p-4 rounded-full mb-4 ${darkMode ? 'bg-amber-500/10 text-amber-400' : 'bg-amber-50 text-amber-600'}`}>
-              <Lock className="w-10 h-10 animate-pulse" />
-            </div>
-            <h2 className="text-2xl font-black tracking-tight">Alteração de Senha Obrigatória</h2>
-            <p className="text-xs text-slate-400 mt-2 max-w-xs">
-              Sua conta está utilizando a senha padrão de primeiro acesso (<strong className="font-mono">1234</strong>). Por segurança, cadastre uma nova senha forte para continuar.
-            </p>
-          </div>
-
-          <form onSubmit={handlePasswordChangeSubmit} className="space-y-4">
-            {passwordChangeError && (
-              <div className="p-3.5 text-xs font-semibold bg-rose-500/10 text-rose-500 rounded-xl border border-rose-500/20 flex items-center gap-2">
-                <XCircle className="w-4 h-4 flex-shrink-0" />
-                <span>{passwordChangeError}</span>
-              </div>
-            )}
-
-            {passwordChangeSuccess && (
-              <div className="p-3.5 text-xs font-semibold bg-emerald-500/10 text-emerald-500 rounded-xl border border-emerald-500/20 flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 flex-shrink-0 animate-pulse" />
-                <span>{passwordChangeSuccess}</span>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 opacity-80">
-                Senha Atual
-              </label>
-              <div className="relative">
-                <input
-                  type="password"
-                  value={currentPasswordInput}
-                  onChange={(e) => setCurrentPasswordInput(e.target.value)}
-                  placeholder="Digite '1234'"
-                  className={`w-full text-sm pl-10 pr-4 py-2.5 rounded-xl border focus:outline-none focus:ring-2 transition-all ${
-                    darkMode 
-                      ? 'bg-[#1B221E] border-[#303B34] focus:ring-[#9BB0A5]/40 text-white' 
-                      : 'bg-slate-50 border-slate-200 focus:ring-[#9BB0A5]/20 text-slate-800'
-                  }`}
-                  required
-                />
-                <KeyRound className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 opacity-80">
-                Nova Senha
-              </label>
-              <div className="relative">
-                <input
-                  type={showNewPassword ? "text" : "password"}
-                  value={newPasswordInput}
-                  onChange={(e) => setNewPasswordInput(e.target.value)}
-                  placeholder="Cadastre sua nova senha"
-                  className={`w-full text-sm pl-10 pr-10 py-2.5 rounded-xl border focus:outline-none focus:ring-2 transition-all ${
-                    darkMode 
-                      ? 'bg-[#1B221E] border-[#303B34] focus:ring-[#9BB0A5]/40 text-white' 
-                      : 'bg-slate-50 border-slate-200 focus:ring-[#9BB0A5]/20 text-slate-800'
-                  }`}
-                  required
-                />
-                <Lock className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
-                <button
-                  type="button"
-                  onClick={() => setShowNewPassword(!showNewPassword)}
-                  className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600 hover:scale-115 transition-all"
-                >
-                  {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider mb-1.5 opacity-80">
-                Confirmar Nova Senha
-              </label>
-              <div className="relative">
-                <input
-                  type={showConfirmPassword ? "text" : "password"}
-                  value={confirmPasswordInput}
-                  onChange={(e) => setConfirmPasswordInput(e.target.value)}
-                  placeholder="Confirme sua nova senha"
-                  className={`w-full text-sm pl-10 pr-10 py-2.5 rounded-xl border focus:outline-none focus:ring-2 transition-all ${
-                    darkMode 
-                      ? 'bg-[#1B221E] border-[#303B34] focus:ring-[#9BB0A5]/40 text-white' 
-                      : 'bg-slate-50 border-slate-200 focus:ring-[#9BB0A5]/20 text-slate-800'
-                  }`}
-                  required
-                />
-                <Lock className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600 hover:scale-115 transition-all"
-                >
-                  {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            {/* Live Requirements List */}
-            <div className={`p-4 rounded-xl space-y-2 border text-xs transition-all duration-300 ${darkMode ? 'bg-[#1B221E]/50 border-[#303B34]' : 'bg-slate-50 border-slate-100'}`}>
-              <span className="block font-bold mb-2 opacity-90 text-[10px] uppercase tracking-wider">Requisitos da senha:</span>
-              {reqs.map((req, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  {req.met ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0 animate-[pulse_1s_infinite]" />
-                  ) : (
-                    <div className="w-4 h-4 rounded-full border-2 border-slate-300 flex-shrink-0 transition-colors" />
-                  )}
-                  <span className={`transition-colors duration-200 ${req.met ? 'text-emerald-500 font-semibold' : 'text-slate-400'}`}>
-                    {req.label}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <button
-                type="button"
-                onClick={handleLogout}
-                className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-2 ${
-                  darkMode 
-                    ? 'border-[#303B34] hover:bg-slate-800/50 text-[#ECEBE5]' 
-                    : 'border-slate-200 hover:bg-slate-50 text-slate-600'
-                }`}
-              >
-                <LogOut className="w-4 h-4" /> Sair
-              </button>
-              <button
-                type="submit"
-                disabled={isChangingPassword || !isMinLength || !hasLetterAndNumber || !hasUppercase || !hasSpecialChar || !passwordsMatch}
-                className={`flex-[2] py-2.5 px-4 rounded-xl text-xs font-bold text-white transition-all shadow-md focus:outline-none focus:ring-2 ${
-                  isChangingPassword || !isMinLength || !hasLetterAndNumber || !hasUppercase || !hasSpecialChar || !passwordsMatch
-                    ? 'bg-slate-300 dark:bg-slate-700 cursor-not-allowed shadow-none'
-                    : 'bg-[#9BB0A5] hover:bg-[#8A9F94] focus:ring-[#9BB0A5]/40 hover:shadow-lg hover:-translate-y-0.5'
-                }`}
-              >
-                {isChangingPassword ? 'Salvando...' : 'Salvar Nova Senha'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className={`min-h-screen flex ${darkMode ? 'dark bg-[#1B221E] text-[#ECEBE5]' : 'bg-[#F9F8F3] text-[#2D312E]'}`}>
-      
+    <div
+      className={`min-h-screen flex ${
+        darkMode ? 'dark bg-[#1B221E] text-[#ECEBE5]' : 'bg-[#F9F8F3] text-[#2D312E]'
+      }`}
+    >
       {/* Sidebar navigation components */}
-      <Sidebar 
+      <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         currentRole={currentRole}
@@ -838,8 +784,8 @@ export default function App() {
           id="btn-sidebar-toggle-show"
           onClick={() => setSidebarOpen(true)}
           className={`fixed bottom-6 left-6 z-40 p-4 rounded-full shadow-2xl flex items-center justify-center cursor-pointer transition-all hover:scale-110 active:scale-95 duration-200 border ${
-            darkMode 
-              ? 'bg-[#242D28] text-[#9BB0A5] border-[#2E3832] hover:bg-[#2E3832]' 
+            darkMode
+              ? 'bg-[#242D28] text-[#9BB0A5] border-[#2E3832] hover:bg-[#2E3832]'
               : 'bg-[#9BB0A5] text-white border-[#8A9F94] hover:bg-[#8A9F94]'
           }`}
           title="Exibir Menu de Opções"
@@ -848,10 +794,30 @@ export default function App() {
         </button>
       )}
 
-      {/* Main Content View with route switch transitions */}
+      {/* Main Content View */}
       <main className="flex-1 p-6 md:p-8 overflow-y-auto h-screen max-w-(screen-xl) mx-auto w-full">
+        {actionError && (
+          <div
+            role="alert"
+            className="mb-6 p-4 rounded-2xl border border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-300 text-xs font-semibold flex items-center justify-between gap-3"
+          >
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <span>{actionError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActionError('')}
+              className="p-1 hover:opacity-75 cursor-pointer"
+              aria-label="Fechar aviso"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {activeTab === 'dashboard' && (
-          <Dashboard 
+          <Dashboard
             currentClinic={currentClinic}
             patients={patients}
             events={events}
@@ -866,7 +832,7 @@ export default function App() {
         )}
 
         {activeTab === 'patients' && (
-          <PatientCRM 
+          <PatientCRM
             currentClinic={currentClinic}
             patients={patients}
             assessments={assessments}
@@ -885,7 +851,7 @@ export default function App() {
         )}
 
         {activeTab === 'agenda' && (
-          <ScheduleCalendar 
+          <ScheduleCalendar
             currentClinic={currentClinic}
             appointments={appointments}
             patients={patients}
@@ -897,7 +863,7 @@ export default function App() {
         )}
 
         {activeTab === 'eventos' && (
-          <EventManagement 
+          <EventManagement
             currentClinic={currentClinic}
             events={events}
             registrations={registrations}
@@ -914,7 +880,7 @@ export default function App() {
         )}
 
         {activeTab === 'financeiro' && (
-          <FinancialHub 
+          <FinancialHub
             currentClinic={currentClinic}
             transactions={transactions}
             onAddTransaction={handleAddTransaction}
@@ -924,7 +890,7 @@ export default function App() {
         )}
 
         {activeTab === 'relatorios' && (
-          <ReportsCenter 
+          <ReportsCenter
             currentClinic={currentClinic}
             patients={patients}
             events={events}
@@ -938,7 +904,7 @@ export default function App() {
         )}
 
         {activeTab === 'clinicas' && (
-          <ClinicSettings 
+          <ClinicSettings
             clinics={clinics}
             currentClinic={currentClinic}
             onAddClinic={handleAddClinic}
@@ -963,11 +929,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'busca_estudos' && (
-          <StudySearch 
-            darkMode={darkMode}
-          />
-        )}
+        {activeTab === 'busca_estudos' && <StudySearch darkMode={darkMode} />}
       </main>
     </div>
   );

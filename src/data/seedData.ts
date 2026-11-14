@@ -33,8 +33,7 @@ export const initialSystemUsers: SystemUser[] = [
     email: 'jossiefreitas.jgf@gmail.com',
     role: 'Desenvolvedor',
     status: 'Ativo',
-    createdAt: '2026-06-23',
-    password: '1234'
+    createdAt: '2026-06-23'
   },
   {
     id: 'user-1',
@@ -43,8 +42,7 @@ export const initialSystemUsers: SystemUser[] = [
     email: 'ana.flavia@csmclinical.com.br',
     role: 'Admin',
     status: 'Ativo',
-    createdAt: '2026-01-10',
-    password: '1234'
+    createdAt: '2026-01-10'
   },
   {
     id: 'user-2',
@@ -53,8 +51,7 @@ export const initialSystemUsers: SystemUser[] = [
     email: 'gabriela.nunes@csmclinical.com.br',
     role: 'Fisio',
     status: 'Ativo',
-    createdAt: '2026-02-15',
-    password: '1234'
+    createdAt: '2026-02-15'
   },
   {
     id: 'user-3',
@@ -63,8 +60,7 @@ export const initialSystemUsers: SystemUser[] = [
     email: 'silvia.recepcao@csmclinical.com.br',
     role: 'Recepcao',
     status: 'Ativo',
-    createdAt: '2026-03-01',
-    password: '1234'
+    createdAt: '2026-03-01'
   },
   {
     id: 'user-4',
@@ -73,8 +69,7 @@ export const initialSystemUsers: SystemUser[] = [
     email: 'joao.mendes@csmclinical.com.br',
     role: 'Admin',
     status: 'Ativo',
-    createdAt: '2026-04-12',
-    password: '1234'
+    createdAt: '2026-04-12'
   }
 ];
 

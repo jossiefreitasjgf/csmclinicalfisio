@@ -77,15 +77,13 @@ export default function ClinicSettings({
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserRole, setNewUserRole] = useState<UserRole>('Fisio');
-  const [newUserPassword, setNewUserPassword] = useState('1234');
-  const [userSuccess, setUserSuccess] = useState(false);
+  const [userNotice, setUserNotice] = useState('');
 
   // Developer/Manager: User account inline editing states
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [userEditName, setUserEditName] = useState('');
   const [userEditEmail, setUserEditEmail] = useState('');
   const [userEditRole, setUserEditRole] = useState<UserRole>('Fisio');
-  const [userEditPassword, setUserEditPassword] = useState('');
   const [userEditClinicId, setUserEditClinicId] = useState('');
   const [selectedUserClinicFilter, setSelectedUserClinicFilter] = useState<string>('all');
 
@@ -145,18 +143,16 @@ export default function ClinicSettings({
     onAddSystemUser({
       clinicId: currentClinic.id,
       name: newUserName,
-      email: newUserEmail,
+      email: newUserEmail.toLowerCase().trim(),
       role: newUserRole,
       status: 'Ativo',
-      password: newUserPassword
     });
 
     setNewUserName('');
     setNewUserEmail('');
     setNewUserRole('Fisio');
-    setNewUserPassword('1234');
-    setUserSuccess(true);
-    setTimeout(() => setUserSuccess(false), 3000);
+    setUserNotice('Use o Firebase Admin CLI (`npm run admin -- create-user`) para provisionar novos usuários com segurança.');
+    setTimeout(() => setUserNotice(''), 6000);
   };
 
   const handleToggleUserStatus = (user: SystemUser) => {
@@ -166,7 +162,8 @@ export default function ClinicSettings({
 
   const handleUpgradePlan = (plan: Clinic['plan']) => {
     onUpdateClinicPlan(currentClinic.id, plan);
-    alert(`Sucesso! Sua clínica ${currentClinic.name} foi atualizada para o plano ${plan}. As novas cobranças de fatura já estão programadas.`);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 3000);
   };
 
   // Filter users belonging only to active clinic, with all clinics support for Developers
@@ -493,34 +490,19 @@ export default function ClinicSettings({
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Senha de Acesso ao Sistema</label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
-                    <Lock className="w-3.5 h-3.5" />
-                  </span>
-                  <input
-                    type="text"
-                    required
-                    value={newUserPassword}
-                    onChange={(e) => setNewUserPassword(e.target.value)}
-                    placeholder="Ex: 1234"
-                    className={`w-full text-xs font-semibold rounded-xl pl-9 pr-4 py-2.5 outline-none border transition-all ${
-                      darkMode ? 'bg-slate-800 border-slate-700 text-white focus:border-teal-500' : 'bg-white border-[#E5E3DB] text-slate-800 focus:border-teal-400'
-                    }`}
-                  />
-                </div>
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-700 dark:text-amber-300 leading-relaxed">
+                Por segurança do Firestore, novos cadastros e redefinição de senha são feitos pelo <strong>Admin CLI</strong> (<code className="font-mono">npm run admin -- create-user</code>).
               </div>
 
               <div className="pt-2">
-                {userSuccess && (
-                  <p className="text-[10px] text-emerald-500 font-bold mb-2">✓ Usuário ativado com sucesso!</p>
+                {userNotice && (
+                  <p className="text-[10px] text-amber-600 dark:text-amber-400 font-bold mb-2">{userNotice}</p>
                 )}
                 <button
                   type="submit"
                   className="w-full py-2.5 bg-[#9BB0A5] hover:bg-[#8A9F94] text-white font-bold text-xs rounded-xl transition-all shadow-xs cursor-pointer flex items-center justify-center gap-1"
                 >
-                  <Plus className="w-4 h-4" /> Cadastrar Usuário
+                  <Plus className="w-4 h-4" /> Solicitar Provisionamento
                 </button>
               </div>
 
@@ -560,7 +542,7 @@ export default function ClinicSettings({
                     <th scope="col" className="p-4 font-bold uppercase tracking-wider text-[10px] text-slate-400">Nome/Email</th>
                     <th scope="col" className="p-4 font-bold uppercase tracking-wider text-[10px] text-slate-400">Unidade</th>
                     <th scope="col" className="p-4 font-bold uppercase tracking-wider text-[10px] text-slate-400">Nível de Acesso</th>
-                    <th scope="col" className="p-4 font-bold uppercase tracking-wider text-[10px] text-slate-400">Senha</th>
+                    <th scope="col" className="p-4 font-bold uppercase tracking-wider text-[10px] text-slate-400">Autenticação</th>
                     <th scope="col" className="p-4 font-bold uppercase tracking-wider text-[10px] text-slate-400">Status</th>
                     <th scope="col" className="p-4 font-bold uppercase tracking-wider text-[10px] text-slate-400 text-right">Ações</th>
                   </tr>
@@ -568,7 +550,7 @@ export default function ClinicSettings({
                 <tbody className="divide-y divide-[#E5E3DB] dark:divide-[#2E3832]">
                   {activeClinicUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="p-8 text-center text-slate-400 italic">Nenhum profissional encontrado nesta seleção. Cadastre um novo ao lado!</td>
+                      <td colSpan={6} className="p-8 text-center text-slate-400 italic">Nenhum profissional encontrado nesta seleção.</td>
                     </tr>
                   ) : (
                     activeClinicUsers.map((user) => {
@@ -664,29 +646,11 @@ export default function ClinicSettings({
                             )}
                           </td>
 
-                          {/* Password Field inline updating */}
+                          {/* Firebase Auth managed indicator */}
                           <td className="p-4">
-                            {isEditingThisUser ? (
-                              <input
-                                type="text"
-                                value={userEditPassword}
-                                onChange={(e) => setUserEditPassword(e.target.value)}
-                                className={`w-20 text-[11px] font-mono font-bold rounded-xl px-2 py-1 border outline-none text-center ${
-                                  darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'
-                                }`}
-                              />
-                            ) : (
-                              <input
-                                type="text"
-                                value={user.password || '1234'}
-                                onChange={(e) => onUpdateSystemUser(user.id, { password: e.target.value })}
-                                className={`w-20 text-[11px] font-mono font-bold rounded-xl px-2 py-1 text-center border transition-all ${
-                                  darkMode 
-                                    ? 'bg-slate-800 border-slate-700 text-white focus:border-teal-500' 
-                                    : 'bg-white border-slate-200 text-slate-800 focus:border-teal-400 focus:bg-white'
-                                }`}
-                              />
-                            )}
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400">
+                              <Lock className="w-3 h-3" /> Firebase Auth
+                            </span>
                           </td>
 
                           {/* Active / Inactive switch status */}
@@ -714,10 +678,7 @@ export default function ClinicSettings({
                                     onClick={() => {
                                       onUpdateSystemUser(user.id, {
                                         name: userEditName,
-                                        email: userEditEmail,
                                         role: userEditRole,
-                                        password: userEditPassword,
-                                        clinicId: userEditClinicId
                                       });
                                       setEditingUserId(null);
                                     }}
@@ -742,7 +703,6 @@ export default function ClinicSettings({
                                       setUserEditName(user.name);
                                       setUserEditEmail(user.email);
                                       setUserEditRole(user.role);
-                                      setUserEditPassword(user.password || '1234');
                                       setUserEditClinicId(user.clinicId);
                                     }}
                                     className="p-1 px-2 text-[#8A9F94] hover:text-[#2D312E] dark:hover:text-white font-extrabold hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-all cursor-pointer text-[10px]"
@@ -751,11 +711,7 @@ export default function ClinicSettings({
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      if (confirm(`Deseja realmente remover o colaborador "${user.name}"?`)) {
-                                        onDeleteSystemUser(user.id);
-                                      }
-                                    }}
+                                    onClick={() => onDeleteSystemUser(user.id)}
                                     className="p-1 px-2 text-rose-500 hover:text-rose-700 font-extrabold hover:bg-rose-50 dark:hover:bg-rose-950/20 rounded-lg transition-all cursor-pointer text-[10px]"
                                     disabled={!isDev && activeClinicUsers.length <= 1}
                                     title={!isDev && activeClinicUsers.length <= 1 ? "A clínica deve conter no mínimo 1 usuário ativo." : ""}

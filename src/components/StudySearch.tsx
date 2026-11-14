@@ -179,7 +179,8 @@ export default function StudySearch({ darkMode }: StudySearchProps) {
     const activeCat = categoryToSearch || selectedCategory;
 
     try {
-      const response = await fetch('/api/search-studies', {
+      const apiBaseUrl = import.meta.env.VITE_API_URL || '';
+      const response = await fetch(`${apiBaseUrl}/api/search-studies`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

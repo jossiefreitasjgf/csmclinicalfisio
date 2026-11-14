@@ -49,6 +49,19 @@ export default function ReportsCenter({
   const [selectedEventId, setSelectedEventId] = useState(events[0]?.id || '');
   const [selectedPatientId, setSelectedPatientId] = useState(patients[0]?.id || '');
 
+  const handleDownloadReceipt = (reg: Registration) => {
+    const content = `Comprovante de Pagamento PIX - CSM Clinical\n--------------------------------------------\nInscrição N°: ${reg.registrationNumber}\nEvento ID: ${reg.eventId}\nCriança: ${reg.childName}\nResponsável: ${reg.parentName}\nArquivo original: ${reg.paymentReceiptName}\nTamanho: ${reg.paymentReceiptSize}\nData do Registro: ${reg.date}\nStatus: ${reg.status}\n\nEste é um comprovante de transação digital validado pelo consultório CSM Clinical.`;
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', reg.paymentReceiptName.includes('.') ? reg.paymentReceiptName : `${reg.paymentReceiptName}.txt`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   // Filter listings by active clinic
   const clinicEvents = events.filter(e => e.clinicId === currentClinic.id);
   const clinicPatients = patients.filter(p => p.clinicId === currentClinic.id);
@@ -217,10 +230,22 @@ export default function ReportsCenter({
                           {new Date(reg.date + 'T12:00:00').toLocaleDateString('pt-BR')}
                         </td>
                         <td className="py-4.5 px-2">
-                          <div className="flex items-center gap-1 text-[11px] text-indigo-500 font-bold truncate max-w-[150px]" title="Comprovante Pix Anexado">
-                            📂 {reg.paymentReceiptName}
+                          <div className="flex items-center justify-between gap-1 max-w-[170px]">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1 text-[11px] text-indigo-500 font-bold truncate" title={reg.paymentReceiptName}>
+                                📂 {reg.paymentReceiptName}
+                              </div>
+                              <span className="text-[9px] text-slate-400 font-bold block">({reg.paymentReceiptSize})</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadReceipt(reg)}
+                              className="p-1 text-indigo-500 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-all cursor-pointer shrink-0"
+                              title="Baixar Comprovante"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </button>
                           </div>
-                          <span className="text-[9px] text-slate-400 font-bold">({reg.paymentReceiptSize})</span>
                         </td>
                         <td className="py-4.5 px-2 text-center">
                           <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full ${

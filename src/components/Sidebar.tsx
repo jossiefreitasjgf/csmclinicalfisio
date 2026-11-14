@@ -175,7 +175,7 @@ export default function Sidebar({
     { id: 'busca_estudos', label: 'Estudos & Tratamentos', icon: Sparkles, roles: ['Admin', 'Fisio'] },
     { id: 'agenda', label: 'Agenda Clínica', icon: CalendarIcon, roles: ['Admin', 'Fisio', 'Recepcao'] },
     { id: 'eventos', label: 'Gestão de Eventos', icon: CalendarDays, roles: ['Admin', 'Fisio', 'Recepcao'] },
-    { id: 'financeiro', label: 'Financeiro', icon: DollarSign, roles: ['Admin', 'Recepcao'] },
+    { id: 'financeiro', label: 'Financeiro', icon: DollarSign, roles: ['Admin'] },
     { id: 'relatorios', label: 'Relatórios', icon: FileText, roles: ['Admin', 'Fisio'] },
     { id: 'comunicacao', label: 'Modos de Comunicação', icon: MessageSquare, roles: ['Admin', 'Desenvolvedor'] },
     { id: 'clinicas', label: 'SaaS Multi-Clínica', icon: Building2, roles: ['Desenvolvedor'] },
@@ -472,7 +472,7 @@ export default function Sidebar({
                   Desenvolvedor: ['dashboard', 'patients', 'busca_estudos', 'agenda', 'eventos', 'financeiro', 'relatorios', 'comunicacao', 'clinicas'],
                   Admin: ['dashboard', 'patients', 'busca_estudos', 'agenda', 'eventos', 'financeiro', 'relatorios', 'comunicacao'],
                   Fisio: ['dashboard', 'patients', 'busca_estudos', 'agenda', 'eventos', 'relatorios'],
-                  Recepcao: ['dashboard', 'agenda', 'eventos', 'financeiro']
+                  Recepcao: ['dashboard', 'agenda', 'eventos']
                 };
                 if (!correspondingMap[role].includes(activeTab)) {
                   setActiveTab('dashboard');

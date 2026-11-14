@@ -209,6 +209,9 @@ export default function PatientCRM({
   const [recType, setRecType] = useState<MedicalRecord['type']>('Evolução');
   const [recDesc, setRecDesc] = useState('');
   const [recAttachmentName, setRecAttachmentName] = useState('');
+  const [recAttachmentDataUrl, setRecAttachmentDataUrl] = useState<string | undefined>(undefined);
+  const [recAttachmentSize, setRecAttachmentSize] = useState<string>('250 KB');
+  const [dragActive, setDragActive] = useState(false);
 
   // Filter lists by clinic
   const clinicPatients = patients.filter(p => p.clinicId === currentClinic.id);
@@ -302,12 +305,78 @@ export default function PatientCRM({
     setShowAddAssessmentModal(false);
   };
 
+  const handleFileChangeHelper = (file: File) => {
+    setRecAttachmentName(file.name);
+    const sizeInKb = Math.round(file.size / 1024);
+    setRecAttachmentSize(sizeInKb > 1000 ? `${(sizeInKb / 1024).toFixed(1)} MB` : `${sizeInKb} KB`);
+    
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setRecAttachmentDataUrl(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFileChangeHelper(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      handleFileChangeHelper(e.target.files[0]);
+    }
+  };
+
+  const handleDownloadAttachment = (file: { name: string; size: string; date: string; dataUrl?: string }) => {
+    if (file.dataUrl) {
+      const link = document.createElement('a');
+      link.href = file.dataUrl;
+      link.setAttribute('download', file.name);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      const content = `Documento Clínico de Fisioterapia Pediátrica\nArquivo: ${file.name}\nData de Registro: ${file.date}\nTamanho Estimado: ${file.size}\n\nEste é um documento de simulação gerado pelo sistema CSM Clinical para o prontuário do paciente.\nConteúdo simulado de exames e laudos clínicos.`;
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', file.name.includes('.') ? file.name : `${file.name}.txt`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+  };
+
   const handleRecordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activePatient || !recTitle || !recDesc) return;
 
     const attachmentsList = recAttachmentName 
-      ? [{ name: recAttachmentName, size: '250 KB', date: new Date().toISOString().split('T')[0] }] 
+      ? [{ 
+          name: recAttachmentName, 
+          size: recAttachmentSize || '250 KB', 
+          date: new Date().toISOString().split('T')[0],
+          dataUrl: recAttachmentDataUrl
+        }] 
       : undefined;
 
     onAddMedicalRecord(activePatient.id, {
@@ -320,6 +389,8 @@ export default function PatientCRM({
     setRecTitle('');
     setRecDesc('');
     setRecAttachmentName('');
+    setRecAttachmentDataUrl(undefined);
+    setRecAttachmentSize('250 KB');
     setShowAddRecordModal(false);
   };
 
@@ -659,8 +730,18 @@ export default function PatientCRM({
                                       darkMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-150'
                                     }`}
                                   >
-                                    <span className="truncate max-w-[150px] text-slate-650 dark:text-slate-350">📂 {file.name}</span>
-                                    <span className="text-[9px] text-slate-400 font-bold">({file.size})</span>
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                      <span className="truncate max-w-[150px] text-slate-650 dark:text-slate-350" title={file.name}>📂 {file.name}</span>
+                                      <span className="text-[9px] text-slate-400 font-bold shrink-0">({file.size})</span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDownloadAttachment(file)}
+                                      className="p-1 text-indigo-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-200/50 dark:hover:bg-slate-800/50 rounded-lg transition-all cursor-pointer flex items-center justify-center shrink-0"
+                                      title="Baixar Arquivo"
+                                    >
+                                      <Download className="w-3.5 h-3.5" />
+                                    </button>
                                   </div>
                                 ))}
                               </div>
@@ -1581,16 +1662,59 @@ export default function PatientCRM({
                   />
                 </div>
 
-                <div className="sm:col-span-3 space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Anexar Laudo ou Arquivo Digital (Simulado)</label>
-                  <input
-                    type="text" value={recAttachmentName} onChange={(e) => setRecAttachmentName(e.target.value)}
-                    placeholder="laudo_exame_neuromuscular.pdf"
-                    className={`w-full text-xs font-semibold rounded-xl px-4 py-2.5 outline-none border ${
-                      darkMode ? 'bg-slate-800 border-slate-700 text-white focus:border-teal-500' : 'bg-slate-50 border-slate-200 focus:bg-white text-slate-850'
+                <div className="sm:col-span-3 space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-black text-teal-650">Anexar Laudo ou Arquivo Digital</label>
+                  
+                  {/* Drag and Drop Zone */}
+                  <div
+                    onDragEnter={handleDrag}
+                    onDragOver={handleDrag}
+                    onDragLeave={handleDrag}
+                    onDrop={handleDrop}
+                    className={`border-2 border-dashed rounded-xl p-4.5 text-center transition-all relative ${
+                      dragActive
+                        ? 'border-teal-500 bg-teal-500/5'
+                        : darkMode
+                          ? 'border-slate-700 hover:border-slate-600 bg-slate-900/40'
+                          : 'border-slate-200 hover:border-slate-300 bg-slate-50/50'
                     }`}
-                  />
-                  <span className="text-[9px] text-slate-400">Escreva o nome de arquivo com extensão para criar o link simbólico de laudo clinico (Ex: exame_março.jpg).</span>
+                  >
+                    <input
+                      type="file"
+                      id="file-upload-input"
+                      onChange={handleFileInputChange}
+                      className="hidden"
+                    />
+                    
+                    <label
+                      htmlFor="file-upload-input"
+                      className="cursor-pointer flex flex-col items-center justify-center space-y-2"
+                    >
+                      <Upload className="w-6 h-6 text-teal-500 animate-pulse" />
+                      <div className="text-xs">
+                        <span className="font-bold text-teal-500">Arraste e solte</span> ou <span className="font-bold text-teal-500 underline">procure no computador</span>
+                      </div>
+                      <p className="text-[9px] text-slate-400">Suporta PDF, JPG, PNG, DOCX ou TXT</p>
+                    </label>
+                  </div>
+
+                  {/* Manual / Display input */}
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Nome do Arquivo Selecionado</label>
+                    <input
+                      type="text"
+                      value={recAttachmentName}
+                      onChange={(e) => {
+                        setRecAttachmentName(e.target.value);
+                        setRecAttachmentDataUrl(undefined); // Reset dataUrl since they manual typed
+                      }}
+                      placeholder="Nenhum arquivo anexado"
+                      className={`w-full text-xs font-semibold rounded-xl px-4 py-2.5 outline-none border ${
+                        darkMode ? 'bg-slate-800 border-slate-700 text-white focus:border-teal-500' : 'bg-slate-50 border-slate-200 focus:bg-white text-slate-850'
+                      }`}
+                    />
+                    <span className="text-[9px] text-slate-400">Você também pode escrever manualmente para fins de simulação rápida.</span>
+                  </div>
                 </div>
               </div>
 

@@ -29,8 +29,7 @@
         "email": { "type": "string" },
         "role": { "type": "string", "enum": ["Admin", "Fisio", "Recepcao", "Desenvolvedor"] },
         "status": { "type": "string", "enum": ["Ativo", "Inativo"] },
-        "createdAt": { "type": "string" },
-        "password": { "type": "string" }
+        "createdAt": { "type": "string" }
       },
       "required": ["id", "clinicId", "name", "email", "role", "status", "createdAt"]
     },
@@ -90,6 +89,7 @@
         "clinicId": { "type": "string" },
         "eventId": { "type": "string" },
         "childId": { "type": "string" },
+        "patientId": { "type": "string" },
         "childName": { "type": "string" },
         "parentName": { "type": "string" },
         "registrationNumber": { "type": "string" },
@@ -99,7 +99,7 @@
         "paymentReceiptSize": { "type": "string" },
         "ageCalculated": { "type": "number" }
       },
-      "required": ["id", "clinicId", "eventId", "childId", "childName", "parentName", "registrationNumber", "date", "status"]
+      "required": ["id", "clinicId", "eventId", "childId", "patientId", "childName", "parentName", "registrationNumber", "date", "status"]
     },
     "Attendance": {
       "title": "Attendance",
@@ -107,12 +107,13 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
+        "clinicId": { "type": "string" },
         "eventId": { "type": "string" },
         "patientId": { "type": "string" },
         "present": { "type": "boolean" },
         "notes": { "type": "string" }
       },
-      "required": ["id", "eventId", "patientId", "present"]
+      "required": ["id", "clinicId", "eventId", "patientId", "present"]
     },
     "EvolutionaryAssessment": {
       "title": "EvolutionaryAssessment",
@@ -120,11 +121,12 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
+        "clinicId": { "type": "string" },
         "patientId": { "type": "string" },
         "date": { "type": "string" },
         "author": { "type": "string" },
         "coord": { "type": "number" },
-        "equilibrio: ": { "type": "number" },
+        "equilibrio": { "type": "number" },
         "mobilidade": { "type": "number" },
         "forca": { "type": "number" },
         "motricidadeFina": { "type": "number" },
@@ -133,7 +135,7 @@
         "participacaoGrupo": { "type": "number" },
         "notes": { "type": "string" }
       },
-      "required": ["id", "patientId", "date", "author"]
+      "required": ["id", "clinicId", "patientId", "date", "author"]
     },
     "MedicalRecord": {
       "title": "MedicalRecord",
@@ -141,6 +143,7 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
+        "clinicId": { "type": "string" },
         "patientId": { "type": "string" },
         "date": { "type": "string" },
         "title": { "type": "string" },
@@ -148,7 +151,7 @@
         "description": { "type": "string" },
         "author": { "type": "string" }
       },
-      "required": ["id", "patientId", "date", "title", "type", "description", "author"]
+      "required": ["id", "clinicId", "patientId", "date", "title", "type", "description", "author"]
     },
     "Appointment": {
       "title": "Appointment",

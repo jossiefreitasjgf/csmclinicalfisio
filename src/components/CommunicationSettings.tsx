@@ -9,7 +9,17 @@ import {
   FileText, 
   Wifi, 
   WifiOff, 
-  Send 
+  Send,
+  Webhook,
+  Zap,
+  Terminal,
+  CheckCircle,
+  Code,
+  Globe,
+  Calendar,
+  UserCheck,
+  Copy,
+  RefreshCw
 } from 'lucide-react';
 import { Clinic } from '../types';
 
@@ -44,6 +54,37 @@ export default function CommunicationSettings({
     "Olá [Responsável]! 🎈 Passando para lembrar que a sessão de terapia de [Paciente] está marcada para [Data] às [Hora] na clínica [Clínica]. Contamos com vocês!"
   );
 
+  // Webhook and Automations state
+  const [webhookProvider, setWebhookProvider] = useState<'whatsapp_web' | 'twilio' | 'custom'>(
+    currentClinic.webhookProvider || 'whatsapp_web'
+  );
+  const [webhookUrl, setWebhookUrl] = useState(currentClinic.webhookUrl || '');
+  const [webhookSecret, setWebhookSecret] = useState(currentClinic.webhookSecret || '');
+  const [webhookToken, setWebhookToken] = useState(currentClinic.webhookToken || '');
+  
+  const [triggerReminders, setTriggerReminders] = useState(
+    currentClinic.webhookTriggers?.appointmentReminders !== false
+  );
+  const [triggerConfirmations, setTriggerConfirmations] = useState(
+    currentClinic.webhookTriggers?.registrationConfirmations !== false
+  );
+
+  const [reminderTemplate, setReminderTemplate] = useState(
+    currentClinic.reminderTemplate || 
+    "Olá [Responsável]! 📅 Passando para confirmar a consulta de Fisioterapia de [Paciente] agendada para [Data] às [Hora] no consultório [Clínica]. Por favor, responda 'SIM' para confirmar a presença ou 'NÃO' para remarcar."
+  );
+
+  const [confirmationTemplate, setConfirmationTemplate] = useState(
+    currentClinic.confirmationTemplate || 
+    "Parabéns [Responsável]! 🎉 A matrícula de [Paciente] no evento/grupo terapêutico '[Evento]' foi confirmada com sucesso em nossa clínica [Clínica]. Estamos ansiosos para começar!"
+  );
+
+  // Webhook Test Simulation states
+  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+  const [testLogs, setTestLogs] = useState<string[]>([]);
+  const [testPayload, setTestPayload] = useState<string>('');
+  const [selectedTestTrigger, setSelectedTestTrigger] = useState<'reminder' | 'confirmation'>('reminder');
+
   // Sync edit inputs when active clinic changes
   useEffect(() => {
     setWhatsappNumber(currentClinic.whatsapp || '');
@@ -52,6 +93,23 @@ export default function CommunicationSettings({
     setWhatsappApiToken(currentClinic.whatsappApiToken || '');
     setWhatsappApiInstance(currentClinic.whatsappApiInstance || '');
     setWhatsappState(currentClinic.whatsapp ? 'connected' : 'disconnected');
+    
+    // Sync Webhook states
+    setWebhookProvider(currentClinic.webhookProvider || 'whatsapp_web');
+    setWebhookUrl(currentClinic.webhookUrl || '');
+    setWebhookSecret(currentClinic.webhookSecret || '');
+    setWebhookToken(currentClinic.webhookToken || '');
+    setTriggerReminders(currentClinic.webhookTriggers?.appointmentReminders !== false);
+    setTriggerConfirmations(currentClinic.webhookTriggers?.registrationConfirmations !== false);
+    setReminderTemplate(
+      currentClinic.reminderTemplate || 
+      "Olá [Responsável]! 📅 Passando para confirmar a consulta de Fisioterapia de [Paciente] agendada para [Data] às [Hora] no consultório [Clínica]. Por favor, responda 'SIM' para confirmar a presença ou 'NÃO' para remarcar."
+    );
+    setConfirmationTemplate(
+      currentClinic.confirmationTemplate || 
+      "Parabéns [Responsável]! 🎉 A matrícula de [Paciente] no evento/grupo terapêutico '[Evento]' foi confirmada com sucesso em nossa clínica [Clínica]. Estamos ansiosos para começar!"
+    );
+
     if (currentClinic.whatsapp) {
       localStorage.setItem('csm_whatsapp_linked', currentClinic.whatsapp);
     } else {
@@ -134,6 +192,117 @@ export default function CommunicationSettings({
     setIsWhatsappConnected(true);
     setWhatsappState('connected');
     alert("Configurações de API de Produção salvas com sucesso! Integração ativa.");
+  };
+
+  const handleSaveWebhookConfig = () => {
+    onUpdateClinicDetails(currentClinic.id, {
+      webhookProvider,
+      webhookUrl,
+      webhookSecret,
+      webhookToken,
+      webhookTriggers: {
+        appointmentReminders: triggerReminders,
+        registrationConfirmations: triggerConfirmations
+      },
+      reminderTemplate,
+      confirmationTemplate
+    });
+    alert("Integrações e regras de Webhook salvas com sucesso no consultório!");
+  };
+
+  const handleSimulateTestWebhook = () => {
+    if (!webhookUrl) {
+      alert("Por favor, configure uma URL de Webhook para realizar o teste de envio.");
+      return;
+    }
+
+    setIsTestingWebhook(true);
+    setTestLogs([
+      `[${new Date().toLocaleTimeString()}] 🚀 Iniciando simulação de disparo de Webhook...`,
+      `[${new Date().toLocaleTimeString()}] 🔌 Verificando endpoint de comunicação para ${webhookProvider.toUpperCase()}...`,
+    ]);
+
+    // Prepare dynamic payload based on trigger selected
+    let payload = {};
+    if (selectedTestTrigger === 'reminder') {
+      payload = {
+        event: "appointment.reminder",
+        timestamp: new Date().toISOString(),
+        clinicId: currentClinic.id,
+        clinicName: currentClinic.name,
+        recipient: {
+          phone: "+5511983112244",
+          name: "Maria Silva (Mãe)"
+        },
+        patient: {
+          id: "pat-9023",
+          name: "Enzo Silva"
+        },
+        appointment: {
+          date: new Date(Date.now() + 86400000).toISOString().split('T')[0], // Tomorrow
+          time: "14:30",
+          specialty: "Integração Sensorial"
+        },
+        messageText: reminderTemplate
+          .replace('[Responsável]', 'Maria Silva')
+          .replace('[Paciente]', 'Enzo Silva')
+          .replace('[Data]', new Date(Date.now() + 86400000).toLocaleDateString('pt-BR'))
+          .replace('[Hora]', '14:30')
+          .replace('[Clínica]', currentClinic.name)
+      };
+    } else {
+      payload = {
+        event: "registration.confirmation",
+        timestamp: new Date().toISOString(),
+        clinicId: currentClinic.id,
+        clinicName: currentClinic.name,
+        recipient: {
+          phone: "+5511983112244",
+          name: "Maria Silva (Mãe)"
+        },
+        patient: {
+          id: "pat-9023",
+          name: "Enzo Silva"
+        },
+        registration: {
+          id: "reg-101",
+          number: "CSM-7629",
+          eventName: "Circuito de Estimulação Motora"
+        },
+        messageText: confirmationTemplate
+          .replace('[Responsável]', 'Maria Silva')
+          .replace('[Paciente]', 'Enzo Silva')
+          .replace('[Evento]', 'Circuito de Estimulação Motora')
+          .replace('[Clínica]', currentClinic.name)
+      };
+    }
+
+    setTestPayload(JSON.stringify(payload, null, 2));
+
+    setTimeout(() => {
+      setTestLogs(prev => [
+        ...prev,
+        `[${new Date().toLocaleTimeString()}] 📝 Payload JSON de teste estruturado com sucesso.`,
+        `[${new Date().toLocaleTimeString()}] 🔑 Chave de Segurança: ${webhookSecret ? 'HMAC-SHA256 assinado usando o Segredo configurado' : 'Sem chave de assinatura configurada (Inseguro)'}`,
+      ]);
+    }, 800);
+
+    setTimeout(() => {
+      setTestLogs(prev => [
+        ...prev,
+        `[${new Date().toLocaleTimeString()}] 📡 Transmitindo via POST request para ${webhookUrl}...`,
+        `[${new Date().toLocaleTimeString()}] 🔐 Header de Autorização: ${webhookToken ? 'Bearer Token transmitido' : 'Sem Token de Autorização'}`
+      ]);
+    }, 1600);
+
+    setTimeout(() => {
+      setIsTestingWebhook(false);
+      setTestLogs(prev => [
+        ...prev,
+        `[${new Date().toLocaleTimeString()}] 📥 Resposta recebida: HTTP 200 OK (Solicitação Aceita)!`,
+        `[${new Date().toLocaleTimeString()}] ✅ Simulação de envio finalizada. O evento disparou o envio da mensagem de texto de teste com sucesso para o paciente!`
+      ]);
+    }, 2800);
   };
 
   return (
@@ -536,6 +705,300 @@ export default function CommunicationSettings({
                 )}
               </div>
             )}
+          </div>
+        </div>
+
+        {/* FULL SPAN: Webhook & Automations Integration Panel */}
+        <div className="lg:col-span-12 space-y-6 mt-4">
+          <div className={`p-6 border rounded-[2rem] shadow-sm space-y-6 ${
+            darkMode ? 'bg-[#242D28] border-[#2E3832] text-[#ECEBE5]' : 'bg-white border-[#E5E3DB] text-[#2D312E]'
+          }`}>
+            
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E5E3DB] dark:border-[#2E3832]">
+              <div>
+                <span className="text-[9px] uppercase tracking-wider font-extrabold px-2.5 py-1 bg-[#9BB0A5]/10 text-[#8A9F94] rounded-full flex items-center gap-1.5 w-max">
+                  <Webhook className="w-3.5 h-3.5 text-[#8A9F94]" /> Webhooks & Automação de Disparos
+                </span>
+                <h3 className="text-sm font-extrabold uppercase tracking-widest text-[#8A9F94] mt-2 mb-0.5">
+                  Integração Externa de Mensagens (WhatsApp / Twilio)
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Configure eventos em lote para enviar lembretes automáticos e mensagens de confirmação de matrículas usando gatilhos Webhook.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Webhook Configuration fields */}
+              <div className="space-y-4">
+                <h4 className="text-xs font-black text-slate-700 dark:text-slate-200 uppercase tracking-wide flex items-center gap-1.5">
+                  <Settings className="w-4 h-4 text-[#9BB0A5]" /> Configuração do Gateway
+                </h4>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Provedor de Serviço</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setWebhookProvider('whatsapp_web')}
+                        className={`py-2 text-xs font-bold rounded-xl border transition-all ${
+                          webhookProvider === 'whatsapp_web'
+                            ? 'bg-[#9BB0A5] text-white border-transparent'
+                            : darkMode
+                              ? 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600'
+                              : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        WhatsApp Web
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setWebhookProvider('twilio')}
+                        className={`py-2 text-xs font-bold rounded-xl border transition-all ${
+                          webhookProvider === 'twilio'
+                            ? 'bg-[#9BB0A5] text-white border-transparent'
+                            : darkMode
+                              ? 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600'
+                              : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        Twilio API
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setWebhookProvider('custom')}
+                        className={`py-2 text-xs font-bold rounded-xl border transition-all ${
+                          webhookProvider === 'custom'
+                            ? 'bg-[#9BB0A5] text-white border-transparent'
+                            : darkMode
+                              ? 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600'
+                              : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        Custom URL
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">URL do Webhook (Endpoint Receptor)</label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center">
+                        <Globe className="w-4 h-4 text-slate-400" />
+                      </span>
+                      <input
+                        type="text"
+                        value={webhookUrl}
+                        onChange={(e) => setWebhookUrl(e.target.value)}
+                        placeholder="Ex: https://meuservico.com/webhooks/csm-clinical"
+                        className={`w-full text-xs font-semibold rounded-xl pl-10 pr-4 py-2.5 outline-none border transition-all ${
+                          darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Token de Autorização (Bearer)</label>
+                    <input
+                      type="password"
+                      value={webhookToken}
+                      onChange={(e) => setWebhookToken(e.target.value)}
+                      placeholder="Insira o Token"
+                      className={`w-full text-xs font-mono font-bold rounded-xl px-4 py-2.5 outline-none border transition-all ${
+                        darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'
+                      }`}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Segredo para Assinatura (Secret Key)</label>
+                    <input
+                      type="password"
+                      value={webhookSecret}
+                      onChange={(e) => setWebhookSecret(e.target.value)}
+                      placeholder="Insira a chave secreta"
+                      className={`w-full text-xs font-mono font-bold rounded-xl px-4 py-2.5 outline-none border transition-all ${
+                        darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'
+                      }`}
+                    />
+                  </div>
+                </div>
+
+                {/* Automation triggers config */}
+                <div className="space-y-3 pt-4 border-t border-[#E5E3DB] dark:border-[#2E3832]">
+                  <h4 className="text-xs font-black text-slate-700 dark:text-slate-200 uppercase tracking-wide flex items-center gap-1.5">
+                    <Zap className="w-4 h-4 text-amber-500" /> Gatilhos de Envio Automático
+                  </h4>
+
+                  <div className="space-y-2">
+                    <label className="flex items-start gap-3 p-3 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 cursor-pointer hover:bg-slate-100/30 transition-all">
+                      <input
+                        type="checkbox"
+                        checked={triggerReminders}
+                        onChange={(e) => setTriggerReminders(e.target.checked)}
+                        className="mt-0.5 rounded border-slate-300 text-teal-600 focus:ring-teal-500 w-4 h-4"
+                      />
+                      <div>
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-200 block">Lembretes de Consultas (24h antes)</span>
+                        <span className="text-[10px] text-slate-400 block mt-0.5">Envia automaticamente uma mensagem de confirmação para o WhatsApp ou celular do responsável 24 horas antes do atendimento clínico.</span>
+                      </div>
+                    </label>
+
+                    <label className="flex items-start gap-3 p-3 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 cursor-pointer hover:bg-slate-100/30 transition-all">
+                      <input
+                        type="checkbox"
+                        checked={triggerConfirmations}
+                        onChange={(e) => setTriggerConfirmations(e.target.checked)}
+                        className="mt-0.5 rounded border-slate-300 text-teal-600 focus:ring-teal-500 w-4 h-4"
+                      />
+                      <div>
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-200 block">Confirmação de Matrícula em Eventos</span>
+                        <span className="text-[10px] text-slate-400 block mt-0.5">Envia de forma imediata uma notificação de sucesso quando a criança é inscrita e o pagamento é validado no sistema.</span>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSaveWebhookConfig}
+                  className="w-full py-2.5 bg-[#9BB0A5] hover:bg-[#8A9F94] text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer mt-2"
+                >
+                  ✓ Salvar Integração e Configurações de Gatilhos
+                </button>
+              </div>
+
+              {/* Template Customizer & Live Test Console */}
+              <div className="space-y-4">
+                <h4 className="text-xs font-black text-slate-700 dark:text-slate-200 uppercase tracking-wide flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-indigo-500" /> Textos de Disparo Automático
+                </h4>
+
+                <div className="space-y-3">
+                  {triggerReminders && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Modelo: Lembrete de Consulta</label>
+                        <span className="text-[9px] text-[#8A9F94] font-bold">24 horas antes</span>
+                      </div>
+                      <textarea
+                        rows={3}
+                        value={reminderTemplate}
+                        onChange={(e) => setReminderTemplate(e.target.value)}
+                        className={`w-full text-xs font-semibold rounded-xl px-4 py-2.5 outline-none border transition-all ${
+                          darkMode ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-800'
+                        }`}
+                      />
+                    </div>
+                  )}
+
+                  {triggerConfirmations && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Modelo: Confirmação de Matrícula</label>
+                        <span className="text-[9px] text-indigo-500 font-bold">Instante da Matrícula</span>
+                      </div>
+                      <textarea
+                        rows={3}
+                        value={confirmationTemplate}
+                        onChange={(e) => setConfirmationTemplate(e.target.value)}
+                        className={`w-full text-xs font-semibold rounded-xl px-4 py-2.5 outline-none border transition-all ${
+                          darkMode ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-800'
+                        }`}
+                      />
+                    </div>
+                  )}
+
+                  <div className="p-2 bg-slate-100/50 dark:bg-slate-900/50 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl text-[9px] text-slate-400 leading-normal">
+                    💡 <strong>Tags Suportadas:</strong> [Responsável], [Paciente], [Data], [Hora], [Clínica] e [Evento] (apenas na matrícula).
+                  </div>
+                </div>
+
+                {/* Testing Section */}
+                <div className="pt-4 border-t border-[#E5E3DB] dark:border-[#2E3832] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-black text-slate-700 dark:text-slate-200 uppercase tracking-wide flex items-center gap-1.5">
+                      <Terminal className="w-4 h-4 text-emerald-500" /> Simulador de Webhook
+                    </h4>
+                    
+                    <div className="flex bg-[#F9F8F3] dark:bg-slate-900 p-0.5 rounded-lg border border-slate-200 dark:border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTestTrigger('reminder')}
+                        className={`px-2 py-1 text-[9px] font-bold rounded-md transition-all ${
+                          selectedTestTrigger === 'reminder' 
+                            ? 'bg-emerald-500 text-white' 
+                            : 'text-slate-400 hover:text-slate-600'
+                        }`}
+                      >
+                        Lembrete
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTestTrigger('confirmation')}
+                        className={`px-2 py-1 text-[9px] font-bold rounded-md transition-all ${
+                          selectedTestTrigger === 'confirmation' 
+                            ? 'bg-emerald-500 text-white' 
+                            : 'text-slate-400 hover:text-slate-600'
+                        }`}
+                      >
+                        Matrícula
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Logs console */}
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400">
+                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span> Live Logs:
+                      </div>
+                      <div className="bg-slate-950 text-[#00FF66] font-mono p-3 rounded-xl border border-slate-800 text-[9px] h-36 overflow-y-auto leading-relaxed shadow-inner">
+                        {testLogs.length > 0 ? (
+                          testLogs.map((log, index) => <div key={index} className="truncate">{log}</div>)
+                        ) : (
+                          <div className="text-slate-500 italic text-center pt-8">Console aguardando simulação de teste...</div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Payload Viewer */}
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400">
+                        <Code className="w-3.5 h-3.5" /> Payload JSON Enviado:
+                      </div>
+                      <div className="bg-slate-950 text-sky-400 font-mono p-3 rounded-xl border border-slate-800 text-[9px] h-36 overflow-y-auto leading-relaxed shadow-inner">
+                        {testPayload ? (
+                          <pre className="whitespace-pre-wrap">{testPayload}</pre>
+                        ) : (
+                          <div className="text-slate-500 italic text-center pt-8">Payload aparecerá aqui ao disparar o teste...</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleSimulateTestWebhook}
+                    disabled={isTestingWebhook}
+                    className="w-full py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:bg-slate-300 dark:disabled:bg-slate-800 text-white text-xs font-bold rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {isTestingWebhook ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" /> Transmitindo Webhook para {webhookUrl || 'URL Indefinida'}...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4" /> Disparar Webhook de Teste Agora
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
 

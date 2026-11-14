@@ -14,6 +14,16 @@ export interface Clinic {
   whatsappApiUrl?: string;
   whatsappApiToken?: string;
   whatsappApiInstance?: string;
+  webhookProvider?: 'whatsapp_web' | 'twilio' | 'custom';
+  webhookUrl?: string;
+  webhookSecret?: string;
+  webhookToken?: string;
+  webhookTriggers?: {
+    appointmentReminders: boolean;
+    registrationConfirmations: boolean;
+  };
+  reminderTemplate?: string;
+  confirmationTemplate?: string;
 }
 
 export interface SystemUser {
@@ -24,7 +34,6 @@ export interface SystemUser {
   role: UserRole;
   status: 'Ativo' | 'Inativo';
   createdAt: string;
-  password?: string;
 }
 
 export interface TherapeuticEvent {
@@ -69,6 +78,7 @@ export interface Registration {
   clinicId: string;
   eventId: string;
   childId: string;
+  patientId?: string;
   childName: string;
   parentName: string;
   registrationNumber: string;
@@ -81,6 +91,7 @@ export interface Registration {
 
 export interface Attendance {
   id: string;
+  clinicId?: string;
   eventId: string;
   patientId: string;
   present: boolean;
@@ -89,6 +100,7 @@ export interface Attendance {
 
 export interface EvolutionaryAssessment {
   id: string;
+  clinicId?: string;
   patientId: string;
   date: string;
   author: string;
@@ -107,13 +119,14 @@ export interface EvolutionaryAssessment {
 
 export interface MedicalRecord {
   id: string;
+  clinicId?: string;
   patientId: string;
   date: string;
   title: string;
   type: 'Anamnese' | 'Evolução' | 'Avaliação' | 'Relatório' | 'Documento';
   description: string;
   author: string;
-  attachments?: { name: string; size: string; date: string }[];
+  attachments?: { name: string; size: string; date: string; dataUrl?: string }[];
 }
 
 export interface Appointment {

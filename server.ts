@@ -1,91 +1,82 @@
-import express from "express";
+import fs from "fs";
 import path from "path";
-import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
+import express from "express";
 import dotenv from "dotenv";
+import cors from "cors";
+import { runStudySearch } from "./lib/studySearch";
 
+dotenv.config({ path: ".env.local" });
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
-app.use(express.json());
-
-// Initialize GoogleGenAI
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    }
+function buildCorsOptions(): cors.CorsOptions {
+  const rawOrigin = process.env.CORS_ORIGIN?.trim();
+  if (!rawOrigin) {
+    return { origin: true, credentials: true };
   }
+  const allowedOrigins = rawOrigin
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  return {
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes("*") || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`Origin ${origin} not allowed by CORS`));
+      }
+    },
+    credentials: true,
+  };
+}
+
+app.use(cors(buildCorsOptions()));
+app.use(express.json({ limit: "1mb" }));
+
+app.get("/api/health", (_req, res) => {
+  res.json({
+    status: "ok",
+    service: "csm-clinical-backend",
+    aiConfigured: Boolean(process.env.GEMINI_API_KEY?.trim()),
+    timestamp: new Date().toISOString(),
+  });
 });
 
-// API endpoint for clinical search and AI summary using googleSearch grounding tool
 app.post("/api/search-studies", async (req, res) => {
   try {
-    const { query, category } = req.body;
-    if (!query) {
+    const { query, category } = req.body ?? {};
+    if (typeof query !== "string" || !query.trim()) {
       return res.status(400).json({ error: "O termo de pesquisa é obrigatório." });
     }
 
-    // Build rich pediatric physiotherapy-focused prompt
-    const prompt = `Aja como um especialista sênior em Fisioterapia Infantil, Neuropediatria e Reabilitação Pediátrica.
-Realize uma busca aprofundada na web para responder à seguinte consulta sobre tratamento ou estudo de caso:
-Assunto da Busca: "${query}"${category ? ` (Foco específico em: ${category})` : ""}
-
-Forneça um relatório clínico completo em português com as seguintes seções estruturadas em Markdown:
-1. **Resumo do Tema e Relevância Clínica** (breve introdução sobre a patologia ou técnica no contexto infantil).
-2. **Estudos Clínicos e Evidências Científicas Recentes** (mencione os principais achados, ensaios clínicos, revisões sistemáticas e o nível de evidência se aplicável).
-3. **Formas e Protocolos de Tratamento** (abordagens de fisioterapia recomendadas, recursos terapêuticos utilizados, frequência e duração se descrito).
-4. **Orientações Práticas e Cuidados** (contraindicações, cuidados no manuseio infantil, envolvimento da família e orientações domiciliares).
-
-Certifique-se de que todas as informações se baseiem nos resultados reais da pesquisa na web (mencionando os estudos originais, PubMed, Scielo, Cochrane, revistas médicas ou diretrizes internacionais de fisioterapia pediátrica).
-Por favor, seja extremamente profissional, preciso e prático para auxiliar um fisioterapeuta no atendimento direto.`;
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-      },
-    });
-
-    const responseText = response.text || "";
-
-    // Extract search grounding metadata sources
-    const sources: { title: string; uri: string }[] = [];
-    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-    if (chunks) {
-      chunks.forEach((chunk: any) => {
-        if (chunk.web?.uri) {
-          sources.push({
-            title: chunk.web.title || "Fonte Científica",
-            uri: chunk.web.uri,
-          });
-        }
+    if (!process.env.GEMINI_API_KEY?.trim()) {
+      return res.status(503).json({
+        error: "Pesquisa científica indisponível: GEMINI_API_KEY não configurada no servidor.",
       });
     }
 
-    // Deduplicate sources
-    const uniqueSources = Array.from(new Map(sources.map((item) => [item.uri, item])).values());
+    const result = await runStudySearch(
+      query,
+      typeof category === "string" ? category : undefined
+    );
 
-    res.json({
-      responseText,
-      sources: uniqueSources,
-    });
-  } catch (error: any) {
+    return res.json(result);
+  } catch (error: unknown) {
     console.error("Erro na API de busca de estudos:", error);
-    res.status(500).json({
+    const message = error instanceof Error ? error.message : String(error);
+    return res.status(500).json({
       error: "Erro interno ao processar a busca de estudos clínicos. Verifique a chave de API ou tente novamente.",
-      details: error.message || String(error),
+      details: message,
     });
   }
 });
 
-// Vite middleware setup
-async function setupVite() {
+async function startServer() {
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -93,10 +84,22 @@ async function setupVite() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+    const indexHtmlPath = path.join(distPath, "index.html");
+
+    if (fs.existsSync(indexHtmlPath)) {
+      app.use(express.static(distPath));
+      app.get("*", (_req, res) => {
+        res.sendFile(indexHtmlPath);
+      });
+    } else {
+      app.get("/", (_req, res) => {
+        res.json({
+          status: "ok",
+          service: "csm-clinical-backend",
+          message: "API backend em execução (Render). Frontend servido separadamente (Vercel).",
+        });
+      });
+    }
   }
 
   app.listen(PORT, "0.0.0.0", () => {
@@ -104,6 +107,7 @@ async function setupVite() {
   });
 }
 
-setupVite().catch((err) => {
+startServer().catch((err) => {
   console.error("Failed to start server:", err);
+  process.exit(1);
 });
